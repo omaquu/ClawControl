@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="fi" data-theme="dark">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control</title>
+  <meta name="description" content="OpenClaw Mission Control — AI Agent Operations Dashboard">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+
+<body>
+  <!-- Auth Guard -->
+  <div id="auth-guard" class="hidden"></div>
+
+  <!-- Main App Shell -->
+  <div id="app-shell" class="app-shell hidden">
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <i class="fa fa-satellite-dish logo-icon"></i>
+          <span class="logo-text">Mission Control</span>
+        </div>
+        <button id="sidebar-toggle" class="icon-btn" title="Toggle sidebar">
+          <i class="fa fa-bars"></i>
+        </button>
+      </div>
+
+      <!-- Gateway Status -->
+      <div class="gateway-status" id="gateway-status">
+        <div class="status-dot" id="gateway-dot"></div>
+        <span id="gateway-label">Connecting…</span>
+      </div>
+
+      <!-- Agent Status -->
+      <div style="padding: 0 1rem; margin-top: 0.5rem; margin-bottom: -0.5rem;">
+        <div class="nav-section-label" style="padding-left:0; margin-bottom: 0.25rem;">LIVE AGENTS</div>
+        <div id="sidebar-agents-list" style="display:flex;flex-direction:column;gap:0.3rem;"></div>
+      </div>
+
+      <!-- Nav Items -->
+      <nav class="sidebar-nav">
+        <div class="nav-section-label">OPERATIONS</div>
+        <a class="nav-item active" data-page="kanban" href="#kanban">
+          <i class="fa fa-columns"></i><span>Mission Queue</span>
+          <span class="nav-badge hidden" id="badge-kanban"></span>
+        </a>
+        <a class="nav-item" data-page="chat" href="#chat">
+          <i class="fa fa-comments"></i><span>Agent Chat</span>
+        </a>
+        <a class="nav-item" data-page="consul" href="#consul">
+          <i class="fa fa-landmark"></i><span>Consul</span>
+        </a>
+        <div class="nav-section-label">ANALYTICS</div>
+        <a class="nav-item" data-page="sessions" href="#sessions">
+          <i class="fa fa-layer-group"></i><span>Sessions</span>
+        </a>
+        <a class="nav-item" data-page="costs" href="#costs">
+          <i class="fa fa-coins"></i><span>Costs</span>
+        </a>
+        <a class="nav-item" data-page="ratelimits" href="#ratelimits">
+          <i class="fa fa-gauge-high"></i><span>Rate Limits</span>
+        </a>
+        <div class="nav-section-label">MANAGEMENT</div>
+        <a class="nav-item" data-page="agents" href="#agents">
+          <i class="fa fa-robot"></i><span>Agents</span>
+        </a>
+        <a class="nav-item" data-page="channels" href="#channels">
+          <i class="fa fa-rss"></i><span>Channels</span>
+        </a>
+        <a class="nav-item" data-page="files" href="#files">
+          <i class="fa fa-folder-open"></i><span>Files</span>
+        </a>
+        <div class="nav-section-label">SYSTEM</div>
+        <a class="nav-item" data-page="health" href="#health">
+          <i class="fa fa-heart-pulse"></i><span>Health</span>
+        </a>
+        <a class="nav-item" data-page="logs" href="#logs">
+          <i class="fa fa-scroll"></i><span>Logs</span>
+        </a>
+        <a class="nav-item" data-page="crons" href="#crons">
+          <i class="fa fa-clock"></i><span>Crons</span>
+        </a>
+        <a class="nav-item" data-page="settings" href="#settings">
+          <i class="fa fa-gear"></i><span>Settings</span>
+        </a>
+      </nav>
+
+      <!-- Sidebar Footer -->
+      <div class="sidebar-footer">
+        <button id="theme-toggle-btn" class="icon-btn" title="Theme customizer">
+          <i class="fa fa-palette"></i>
+        </button>
+        <button id="logout-btn" class="icon-btn" title="Logout">
+          <i class="fa fa-right-from-bracket"></i>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main id="main-content" class="main-content">
+      <!-- Top Bar -->
+      <header class="topbar">
+        <div class="topbar-left" style="display:flex;align-items:center;">
+          <h1 id="page-title" class="page-title">Mission Queue</h1>
+          <select id="workspace-selector" class="form-select"
+            style="margin-left:1.5rem;height:24px;padding:0 24px 0 8px;font-size:0.7rem;width:auto;min-width:120px;background:var(--color-surface);border-color:var(--color-border);"></select>
+        </div>
+        <div class="topbar-right">
+          <div id="error-badge" class="error-badge hidden">
+            <i class="fa fa-triangle-exclamation"></i>
+            <span id="error-count">0</span>
+          </div>
+          <div class="user-info">
+            <i class="fa fa-user-astronaut"></i>
+            <span id="username-display"></span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Page Container -->
+      <div id="page-container" class="page-container">
+        <!-- Pages injected here -->
+      </div>
+    </main>
+
+    <!-- Live Feed Panel (right) -->
+    <aside id="live-feed" class="live-feed">
+      <div class="live-feed-header">
+        <span><i class="fa fa-satellite"></i> Live Feed</span>
+        <button class="icon-btn" id="close-feed-btn"><i class="fa fa-xmark"></i></button>
+      </div>
+      <div id="feed-items" class="feed-items"></div>
+    </aside>
+  </div>
+
+  <!-- Theme Customizer Overlay -->
+  <div id="theme-panel" class="theme-panel hidden">
+    <div class="theme-panel-header">
+      <span><i class="fa fa-palette"></i> Theme</span>
+      <button class="icon-btn" onclick="document.getElementById('theme-panel').classList.add('hidden')"><i
+          class="fa fa-xmark"></i></button>
+    </div>
+    <div class="theme-options">
+      <label>Background<input type="color" data-var="--color-bg" value="#0a0a0f"></label>
+      <label>Surface<input type="color" data-var="--color-surface" value="#13131a"></label>
+      <label>Card<input type="color" data-var="--color-card" value="#1a1a24"></label>
+      <label>Sidebar<input type="color" data-var="--color-sidebar" value="#0d0d14"></label>
+      <label>Accent<input type="color" data-var="--color-accent" value="#6366f1"></label>
+      <label>Accent 2<input type="color" data-var="--color-accent2" value="#8b5cf6"></label>
+      <label>Text<input type="color" data-var="--color-text" value="#e2e8f0"></label>
+      <label>Border<input type="color" data-var="--color-border" value="#2a2a3a"></label>
+      <label>Success<input type="color" data-var="--color-success" value="#10b981"></label>
+      <label>Warning<input type="color" data-var="--color-warning" value="#f59e0b"></label>
+      <label>Danger<input type="color" data-var="--color-danger" value="#ef4444"></label>
+    </div>
+    <div class="theme-presets">
+      <button class="preset-btn" data-preset="dark">Dark</button>
+      <button class="preset-btn" data-preset="midnight">Midnight</button>
+      <button class="preset-btn" data-preset="cyber">Cyber</button>
+      <button class="preset-btn" data-preset="forest">Forest</button>
+    </div>
+    <button class="btn btn-sm btn-ghost" onclick="window.resetTheme()">Reset to Default</button>
+  </div>
+
+  <!-- Global Modal -->
+  <div id="global-modal" class="modal-overlay hidden">
+    <div id="modal-content" class="modal-box"></div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- Keyboard Shortcut Help -->
+  <div id="kb-help" class="kb-help hidden">
+    <div class="kb-help-box">
+      <div class="kb-help-header"><span>⌨️ Keyboard Shortcuts</span><button
+          onclick="document.getElementById('kb-help').classList.add('hidden')">×</button></div>
+      <div class="kb-grid">
+        <kbd>1-9</kbd><span>Switch tabs</span>
+        <kbd>/</kbd><span>Focus search</span>
+        <kbd>Esc</kbd><span>Close modal/panel</span>
+        <kbd>?</kbd><span>Toggle this help</span>
+        <kbd>N</kbd><span>New task</span>
+        <kbd>T</kbd><span>Toggle theme panel</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app.js" type="module"></script>
+</body>
+
+</html>

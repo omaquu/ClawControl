@@ -1,0 +1,28 @@
+version: '3.9'
+
+services:
+  mission-control:
+    build: .
+    container_name: mission-control
+    restart: unless-stopped
+    ports:
+      - "7000:7000"
+    volumes:
+      - mc_data:/data
+      - ${WORKSPACE_DIR:-./workspace}:/workspace
+    environment:
+      - PORT=7000
+      - DATABASE_PATH=/data/mission_control.db
+      - WORKSPACE_DIR=/workspace
+      - OPENCLAW_DIR=/workspace
+      - OPENCLAW_GATEWAY_URL=${OPENCLAW_GATEWAY_URL:-http://host.docker.internal:3000}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
+      - DASHBOARD_TOKEN=${DASHBOARD_TOKEN:-}
+      - MC_API_TOKEN=${MC_API_TOKEN:-}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+      - DASHBOARD_ALLOW_HTTP=${DASHBOARD_ALLOW_HTTP:-false}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  mc_data:
