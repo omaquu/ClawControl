@@ -109,7 +109,7 @@ const OPENCLAW_GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || '';
 const MC_API_TOKEN = process.env.MC_API_TOKEN || '';
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 const DATA_DIR = path.join(WORKSPACE_DIR, 'data');
-const DB_PATH = process.env.DATABASE_PATH || path.join(WORKSPACE_DIR, 'mission-control.db');
+const DB_PATH = process.env.DATABASE_PATH || path.join(WORKSPACE_DIR, 'clawcontrol.db');
 const CREDENTIALS_PATH = path.join(DATA_DIR, 'credentials.json');
 const AUDIT_LOG = path.join(DATA_DIR, 'audit.log');
 const RECOVERY_TOKEN = process.env.DASHBOARD_TOKEN || crypto.randomBytes(16).toString('hex');
@@ -296,7 +296,7 @@ app.post('/api/auth/change-password', requireAuth, (req, res) => {
 app.post('/api/auth/mfa/setup', requireAuth, (req, res) => {
     const creds = loadCreds();
     const secret = authenticator.generateSecret();
-    const otpauth = authenticator.keyuri(creds.username, 'Mission Control', secret);
+    const otpauth = authenticator.keyuri(creds.username, 'ClawControl', secret);
     QRCode.toDataURL(otpauth, (err, url) => {
         if (err) return res.status(500).json({ error: 'QR error' });
         res.json({ secret, qrcode: url, otpauth });
@@ -590,7 +590,7 @@ app.post('/api/workspaces', requireAuth, (req, res) => {
 });
 
 // ─── API: Logs ────────────────────────────────────────────────────────────────
-const ALLOWED_SERVICES = ['openclaw', 'mission-control', 'system', 'audit'];
+const ALLOWED_SERVICES = ['openclaw', 'clawcontrol', 'system', 'audit'];
 
 app.get('/api/logs', requireAuth, (req, res) => {
     const service = ALLOWED_SERVICES.includes(req.query.service) ? req.query.service : 'audit';
@@ -599,7 +599,7 @@ app.get('/api/logs', requireAuth, (req, res) => {
     if (service === 'audit') {
         if (fs.existsSync(AUDIT_LOG)) content = fs.readFileSync(AUDIT_LOG, 'utf8');
     } else if (service === 'system') {
-        content = `[Mission Control] Running on port ${PORT}\n[DB] ${DB_PATH}\n[Workspace] ${WORKSPACE_DIR}`;
+        content = `[ClawControl] Running on port ${PORT}\n[DB] ${DB_PATH}\n[Workspace] ${WORKSPACE_DIR}`;
     } else {
         content = `[${service}] Log access - service not running locally or not available via filesystem.\nConfigure log paths in environment variables.`;
     }
@@ -667,7 +667,7 @@ app.delete('/api/channels/:id', requireAuth, async (req, res) => {
 });
 
 // ─── API: Actions ─────────────────────────────────────────────────────────────
-const ALLOWED_ACTIONS = ['restart-mission-control', 'clear-events', 'nuke-data', 'restart-gateway'];
+const ALLOWED_ACTIONS = ['restart-clawcontrol', 'clear-events', 'nuke-data', 'restart-gateway'];
 app.post('/api/action/:action', requireAuth, async (req, res) => {
     const { action } = req.params;
     if (!ALLOWED_ACTIONS.includes(action)) return res.status(400).json({ error: 'Unknown action' });
@@ -677,7 +677,7 @@ app.post('/api/action/:action', requireAuth, async (req, res) => {
         await Promise.all(['tasks', 'agents', 'sessions', 'events', 'consul_messages', 'chat_messages', 'votes'].map(t => dbRun(`DELETE FROM ${t}`)));
         return res.json({ ok: true });
     }
-    if (action === 'restart-mission-control') {
+    if (action === 'restart-clawcontrol') {
         res.json({ ok: true, message: 'Restarting...' });
         setTimeout(() => process.exit(0), 500);
         return;
@@ -811,7 +811,7 @@ connectGateway();
 // Initialize DB and start server
 initDb().then(() => {
     server.listen(PORT, () => {
-        console.log(`🚀 Mission Control listening on http://localhost:${PORT}`);
+        console.log(`🚀 ClawControl listening on http://localhost:${PORT}`);
         console.log(`📁 Workspace: ${WORKSPACE_DIR}`);
         console.log(`🗄  Database: ${DB_PATH}`);
     });

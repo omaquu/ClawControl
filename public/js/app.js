@@ -61,7 +61,7 @@ function renderLoginPage() {
     <div class="auth-box">
       <div class="auth-logo">
         <i class="fa fa-satellite-dish"></i>
-        <h1>Mission Control</h1>
+        <h1>ClawControl</h1>
         <p>OpenClaw Operations Dashboard</p>
       </div>
       <div id="auth-error" class="auth-error hidden"></div>
@@ -99,7 +99,7 @@ function renderRegisterPage() {
     <div class="auth-box">
       <div class="auth-logo">
         <i class="fa fa-satellite-dish"></i>
-        <h1>Mission Control</h1>
+        <h1>ClawControl</h1>
         <p>First-time setup — create your account</p>
       </div>
       <div id="auth-error" class="auth-error hidden"></div>

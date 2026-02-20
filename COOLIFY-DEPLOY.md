@@ -1,6 +1,6 @@
-# Deploying Mission Control + OpenClaw via Coolify
+# Deploying ClawControl + OpenClaw via Coolify
 
-This guide explains how to deploy **Mission Control** alongside your existing **OpenClaw** gateway on a server using Coolify.
+This guide explains how to deploy **ClawControl** alongside your existing **OpenClaw** gateway on a server using Coolify.
 
 ## Prerequisites
 
@@ -18,7 +18,7 @@ Commit this entire `frozen-ionosphere` folder to a private GitHub repository.
 ```bash
 git init
 git add .
-git commit -m "Initial Mission Control commit"
+git commit -m "Initial ClawControl commit"
 # Push to GitHub
 ```
 
@@ -40,7 +40,7 @@ Coolify will automatically detect the **Dockerfile** in the repository root.
 
 ## Step 4: Configure Data Volumes (Crucial)
 
-Mission Control needs persistent storage for its SQLite database and the `workspace` directory (where OpenClaw config and files live).
+ClawControl needs persistent storage for its SQLite database and the `workspace` directory (where OpenClaw config and files live).
 
 Under the **Storage** tab in your Coolify service settings, add two volumes:
 
@@ -52,7 +52,7 @@ Under the **Storage** tab in your Coolify service settings, add two volumes:
    - Name: `mc_workspace`
    - Destination Path: `/workspace`
 
-*Note: The `/data` folder holds `mission_control.db` and audit logs. The `/workspace` folder holds `openclaw.json` and any files the agents manipulate.*
+*Note: The `/data` folder holds `clawcontrol.db` and audit logs. The `/workspace` folder holds `openclaw.json` and any files the agents manipulate.*
 
 ## Step 5: Environment Variables
 
@@ -61,7 +61,7 @@ Under the **Environment Variables** tab in Coolify, add the following required v
 ```ini
 NODE_ENV=production
 PORT=7000
-DATABASE_PATH=/data/mission_control.db
+DATABASE_PATH=/data/clawcontrol.db
 WORKSPACE_DIR=/workspace
 OPENCLAW_DIR=/workspace
 # Set this to true to allow logins over HTTPS proxied by Coolify (Coolify handles SSL, but the inner container sees HTTP)
@@ -74,7 +74,7 @@ WEBHOOK_SECRET=another_secure_string
 
 ### 🔗 Connecting to OpenClaw
 
-To connect Mission Control to your OpenClaw container, you need to set the Gateway URL env var. 
+To connect ClawControl to your OpenClaw container, you need to set the Gateway URL env var. 
 Since both are running on the same server, you have two options:
 
 **Option A: Use internal Docker routing (if both are in the same Coolify network)**
@@ -91,7 +91,7 @@ OPENCLAW_GATEWAY_URL=wss://gateway.yourdomain.com
 OPENCLAW_GATEWAY_TOKEN=the_token_you_set_in_openclaw
 ```
 
-*(Note: If you run into WebSocket connection issues through the proxy, Mission Control allows you to manually override the Gateway URL directly in the browser via the Settings page!)*
+*(Note: If you run into WebSocket connection issues through the proxy, ClawControl allows you to manually override the Gateway URL directly in the browser via the Settings page!)*
 
 ## Step 6: Deploy
 
@@ -109,5 +109,5 @@ The first time you access the dashboard:
 ## Troubleshooting
 
 - **Database Locked / Read-only errors**: Ensure the Coolify storage volumes are working and the container has write permissions to `/data` and `/workspace`.
-- **Can't connect to Gateway**: Go to the **Settings** tab inside Mission Control. Look for "Gateway Config". Put your OpenClaw WebSocket URL in the "Client Override URL" box and hit Save. This forces the browser to connect to OpenClaw directly.
-- **CSP/Login blocked**: Ensure `DASHBOARD_ALLOW_HTTP=true` is set. Coolify terminates SSL at the reverse proxy (Traefik/Caddy), meaning the Express server sees an HTTP request. Without this environment variable, Mission Control's security checks will block the login.
+- **Can't connect to Gateway**: Go to the **Settings** tab inside ClawControl. Look for "Gateway Config". Put your OpenClaw WebSocket URL in the "Client Override URL" box and hit Save. This forces the browser to connect to OpenClaw directly.
+- **CSP/Login blocked**: Ensure `DASHBOARD_ALLOW_HTTP=true` is set. Coolify terminates SSL at the reverse proxy (Traefik/Caddy), meaning the Express server sees an HTTP request. Without this environment variable, ClawControl's security checks will block the login.

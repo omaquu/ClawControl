@@ -17,6 +17,6 @@ EXPOSE 7000
 
 ENV NODE_ENV=production \
     PORT=7000 \
-    DATABASE_PATH=/data/mission_control.db
+    DATABASE_PATH=/data/clawcontrol.db
 
 CMD ["node", "server.js"]

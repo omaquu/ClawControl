@@ -1,9 +1,9 @@
 version: '3.9'
 
 services:
-  mission-control:
+  clawcontrol:
     build: .
-    container_name: mission-control
+    container_name: clawcontrol
     restart: unless-stopped
     ports:
       - "7000:7000"
@@ -12,7 +12,7 @@ services:
       - ${WORKSPACE_DIR:-./workspace}:/workspace
     environment:
       - PORT=7000
-      - DATABASE_PATH=/data/mission_control.db
+      - DATABASE_PATH=/data/clawcontrol.db
       - WORKSPACE_DIR=/workspace
       - OPENCLAW_DIR=/workspace
       - OPENCLAW_GATEWAY_URL=${OPENCLAW_GATEWAY_URL:-http://host.docker.internal:3000}

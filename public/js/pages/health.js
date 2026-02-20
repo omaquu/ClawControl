@@ -48,7 +48,7 @@ function buildLayout() {
   <div class="card">
     <div class="card-title" style="margin-bottom:0.75rem;"><i class="fa fa-bolt"></i> Quick Actions</div>
     <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
-      <button class="btn btn-secondary" data-action="restart-mission-control"><i class="fa fa-rotate"></i> Restart MC</button>
+      <button class="btn btn-secondary" data-action="restart-clawcontrol"><i class="fa fa-rotate"></i> Restart Server</button>
       <button class="btn btn-secondary" data-action="clear-events"><i class="fa fa-broom"></i> Clear Events</button>
       <button class="btn btn-secondary" data-action="nuke-data" style="color:var(--color-danger);border-color:var(--color-danger);"><i class="fa fa-skull"></i> Wipe All Data</button>
     </div>

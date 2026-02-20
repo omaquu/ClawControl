@@ -2,20 +2,20 @@
 let autoRefresh = null;
 
 export async function init(el) {
-    el.innerHTML = buildLayout();
-    await loadLogs();
-    bindEvents(el);
+  el.innerHTML = buildLayout();
+  await loadLogs();
+  bindEvents(el);
 }
 export function refresh(el) { loadLogs(); }
 
 function buildLayout() {
-    return `
+  return `
   <div style="display:flex;gap:0.75rem;align-items:center;margin-bottom:1rem;flex-wrap:wrap;">
     <select id="log-service" style="width:160px;">
       <option value="audit">Audit Log</option>
       <option value="system">System</option>
       <option value="openclaw">OpenClaw</option>
-      <option value="mission-control">Mission Control</option>
+      <option value="clawcontrol">ClawControl</option>
     </select>
     <select id="log-lines" style="width:100px;">
       <option value="50">50 lines</option><option value="100" selected>100 lines</option>
@@ -38,42 +38,42 @@ function buildLayout() {
 }
 
 async function loadLogs() {
-    const service = document.getElementById('log-service')?.value || 'audit';
-    const lines = document.getElementById('log-lines')?.value || '100';
-    const title = document.getElementById('log-title');
-    if (title) title.textContent = service + '.log';
-    const out = document.getElementById('log-output');
-    try {
-        const data = await window.apiFetch(`/logs?service=${service}&lines=${lines}`);
-        if (!data || !out) return;
-        // Colorize log lines
-        out.innerHTML = colorizeLog(data.lines || 'No logs');
-        out.scrollTop = out.scrollHeight;
-    } catch (e) { if (out) out.textContent = 'Error: ' + e.message; }
+  const service = document.getElementById('log-service')?.value || 'audit';
+  const lines = document.getElementById('log-lines')?.value || '100';
+  const title = document.getElementById('log-title');
+  if (title) title.textContent = service + '.log';
+  const out = document.getElementById('log-output');
+  try {
+    const data = await window.apiFetch(`/logs?service=${service}&lines=${lines}`);
+    if (!data || !out) return;
+    // Colorize log lines
+    out.innerHTML = colorizeLog(data.lines || 'No logs');
+    out.scrollTop = out.scrollHeight;
+  } catch (e) { if (out) out.textContent = 'Error: ' + e.message; }
 }
 
 function colorizeLog(text) {
-    return text.split('\n').map(line => {
-        const esc = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        if (/error|ERR|FATAL|failed|exception/i.test(line)) return `<span style="color:#ef4444;">${esc}</span>`;
-        if (/warn|WARNING/i.test(line)) return `<span style="color:#f59e0b;">${esc}</span>`;
-        if (/success|OK|connected|started|listening/i.test(line)) return `<span style="color:#10b981;">${esc}</span>`;
-        if (/\d{4}-\d{2}-\d{2}/.test(line)) return `<span style="color:#6366f1;">${esc}</span>`;
-        return esc;
-    }).join('\n');
+  return text.split('\n').map(line => {
+    const esc = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    if (/error|ERR|FATAL|failed|exception/i.test(line)) return `<span style="color:#ef4444;">${esc}</span>`;
+    if (/warn|WARNING/i.test(line)) return `<span style="color:#f59e0b;">${esc}</span>`;
+    if (/success|OK|connected|started|listening/i.test(line)) return `<span style="color:#10b981;">${esc}</span>`;
+    if (/\d{4}-\d{2}-\d{2}/.test(line)) return `<span style="color:#6366f1;">${esc}</span>`;
+    return esc;
+  }).join('\n');
 }
 
 window.copyLogs = function () {
-    const out = document.getElementById('log-output');
-    navigator.clipboard.writeText(out.textContent).then(() => window.showToast('Copied!', 'success'));
+  const out = document.getElementById('log-output');
+  navigator.clipboard.writeText(out.textContent).then(() => window.showToast('Copied!', 'success'));
 };
 
 function bindEvents(el) {
-    document.getElementById('log-refresh-btn')?.addEventListener('click', loadLogs);
-    document.getElementById('log-service')?.addEventListener('change', loadLogs);
-    document.getElementById('log-lines')?.addEventListener('change', loadLogs);
-    document.getElementById('log-auto-refresh')?.addEventListener('change', (e) => {
-        if (autoRefresh) { clearInterval(autoRefresh); autoRefresh = null; }
-        if (e.target.checked) autoRefresh = setInterval(loadLogs, 5000);
-    });
+  document.getElementById('log-refresh-btn')?.addEventListener('click', loadLogs);
+  document.getElementById('log-service')?.addEventListener('change', loadLogs);
+  document.getElementById('log-lines')?.addEventListener('change', loadLogs);
+  document.getElementById('log-auto-refresh')?.addEventListener('change', (e) => {
+    if (autoRefresh) { clearInterval(autoRefresh); autoRefresh = null; }
+    if (e.target.checked) autoRefresh = setInterval(loadLogs, 5000);
+  });
 }
