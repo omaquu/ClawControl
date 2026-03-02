@@ -268,11 +268,11 @@ function addFeedItem(event) {
   if (!container) return;
   const typeClass = event.type?.includes('ERROR') ? 'type-error' : event.type?.includes('DONE') ? 'type-success' : '';
   const item = document.createElement('div');
-  item.className = `feed - item ${typeClass} `;
-  item.innerHTML = `< div class="feed-item-type" > ${event.type || 'EVENT'}</div >
+  item.className = `feed-item ${typeClass}`;
+  item.innerHTML = `<div class="feed-item-type">${event.type || 'EVENT'}</div>
     <div class="truncate text-xs" style="color:var(--color-text-muted);">${JSON.stringify(event.payload || {}).slice(0, 80)}</div>
     <div class="feed-item-time">${new Date().toLocaleTimeString()}</div>`;
-  item.addEventListener('click', () => openModal(`< div class="modal-header" ><span class="modal-title">${event.type}</span><button class="icon-btn" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div > <pre style="font-size:0.78rem;overflow:auto;max-height:400px;">${JSON.stringify(event, null, 2)}</pre>`));
+  item.addEventListener('click', () => openModal(`<div class="modal-header"><span class="modal-title">${event.type}</span><button class="icon-btn" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div> <pre style="font-size:0.78rem;overflow:auto;max-height:400px;">${JSON.stringify(event, null, 2)}</pre>`));
   container.prepend(item);
   // Keep max 100 items
   while (container.children.length > 100) container.removeChild(container.lastChild);
@@ -289,8 +289,8 @@ function addFeedItem(event) {
 window.showToast = function (message, type = 'info', title = '') {
   const container = document.getElementById('toast-container');
   const el = document.createElement('div');
-  el.className = `toast ${type} `;
-  el.innerHTML = `< div style = "margin-right:0.25rem;color:var(--color-${type === 'success' ? 'success' : type === 'error' ? 'danger' : type === 'warning' ? 'warning' : 'info'})" > <i class="fa fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'circle-exclamation' : type === 'warning' ? 'triangle-exclamation' : 'circle-info'}"></i></div >
+  el.className = `toast ${type}`;
+  el.innerHTML = `<div style="margin-right:0.25rem;color:var(--color-${type === 'success' ? 'success' : type === 'error' ? 'danger' : type === 'warning' ? 'warning' : 'info'})"> <i class="fa fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'circle-exclamation' : type === 'warning' ? 'triangle-exclamation' : 'circle-info'}"></i></div>
     <div class="toast-body">${title ? `<div class="toast-title">${title}</div>` : ''}<div class="toast-msg">${message}</div></div>
     <button class="icon-btn" style="flex-shrink:0" onclick="this.parentElement.remove()"><i class="fa fa-xmark"></i></button>`;
   container.appendChild(el);
@@ -301,7 +301,7 @@ window.showToast = function (message, type = 'info', title = '') {
 window.openModal = function (html, size = '') {
   const overlay = document.getElementById('global-modal');
   const box = document.getElementById('modal-content');
-  box.className = `modal - box ${size} `;
+  box.className = `modal-box ${size}`;
   box.innerHTML = html;
   overlay.classList.remove('hidden');
 };
@@ -371,10 +371,10 @@ async function navigateTo(page) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.page === page));
   document.getElementById('page-title').textContent = PAGE_TITLES[page] || page;
   const container = document.getElementById('page-container');
-  let pageEl = document.getElementById(`page - ${page} `);
+  let pageEl = document.getElementById(`page-${page}`);
   if (!pageEl) {
     pageEl = document.createElement('div');
-    pageEl.id = `page - ${page} `;
+    pageEl.id = `page-${page}`;
     pageEl.className = 'page';
     container.appendChild(pageEl);
   }
@@ -383,11 +383,11 @@ async function navigateTo(page) {
 
   if (!PAGE_MODULES[page]) {
     try {
-      const mod = await import(`/ js / pages / ${page}.js`);
+      const mod = await import(`/js/pages/${page}.js`);
       PAGE_MODULES[page] = mod;
       mod.init(pageEl);
     } catch (e) {
-      pageEl.innerHTML = `< div class="empty-state" ><i class="fa fa-triangle-exclamation"></i><p>Page "${page}" failed to load.<br><small>${e.message}</small></p></div > `;
+      pageEl.innerHTML = `<div class="empty-state"><i class="fa fa-triangle-exclamation"></i><p>Page "${page}" failed to load.<br><small>${e.message}</small></p></div>`;
     }
   } else {
     PAGE_MODULES[page].refresh?.(pageEl);
