@@ -69,6 +69,7 @@ const ZONES = {
     art: { label: '🎨 Art Studio', color: '#ec4899', cx: 6, cz: -6, roles: ['artist', 'creative', 'design', 'art'] },
     explorer: { label: '🔭 Explorer', color: '#06b6d4', cx: 6, cz: 6, roles: ['researcher', 'search', 'scout', 'explore'] },
     security: { label: '🔒 Security', color: '#f59e0b', cx: -6, cz: 6, roles: ['security', 'holvi', 'guard', 'audit'] },
+    orchestrator: { label: '📋 Management', color: '#8b5cf6', cx: 0, cz: -7, roles: ['orchestrator', 'manager', 'lead', 'boss'] },
     lounge: { label: '☕ Lounge', color: '#10b981', cx: 0, cz: 0, roles: [] }, // idle agents
     bedroom: { label: '😴 Bedroom', color: '#4b5563', cx: 0, cz: 9, roles: [] }, // offline agents
 };
@@ -336,6 +337,36 @@ function buildScene(agents, el) {
         // Security camera on wall
         box(scene, 0.22, 0.1, 0.12, cx - 2.7, 3.0, cz - 1.2, '#1a1a2e');
         box(scene, 0.08, 0.08, 0.2, cx - 2.59, 2.98, cz - 1.2, '#1a1a2e');
+    }
+
+    // ─── MANAGEMENT / ORCHESTRATOR CORNER (cx:0 cz:-7) ─────────────────────
+    {
+        const cx = 0, cz = -7;
+        // Massive Whiteboard
+        box(scene, 2.8, 1.4, 0.04, cx, 1.4, cz - 1.2, '#f0f4f8'); // board
+        box(scene, 2.9, 1.5, 0.02, cx, 1.4, cz - 1.22, '#2a2a3a'); // frame
+        // Whiteboard stand (rolling wheels style)
+        cylinder(scene, 0.03, 0.03, 1.8, cx - 1.3, 0.9, cz - 1.2, '#1a1a2e');
+        cylinder(scene, 0.03, 0.03, 1.8, cx + 1.3, 0.9, cz - 1.2, '#1a1a2e');
+        box(scene, 0.8, 0.04, 0.04, cx - 1.3, 0.04, cz - 1.2, '#1a1a2e');
+        box(scene, 0.8, 0.04, 0.04, cx + 1.3, 0.04, cz - 1.2, '#1a1a2e');
+        // Markers and eraser tray
+        box(scene, 2.8, 0.04, 0.1, cx, 0.7, cz - 1.15, '#2a2a3a');
+        // Marker
+        box(scene, 0.12, 0.02, 0.02, cx + 0.4, 0.72, cz - 1.15, '#ef4444');
+        box(scene, 0.12, 0.02, 0.02, cx + 0.6, 0.72, cz - 1.15, '#06b6d4');
+        // Eraser
+        box(scene, 0.15, 0.04, 0.06, cx - 0.5, 0.73, cz - 1.15, '#4b5563');
+        // "Hand-drawn" sticky notes on board
+        [['#fef08a', -0.8, 0.3], ['#fef08a', -0.5, 0.35], ['#fbcfe8', -0.9, 0], ['#a7f3d0', 0.8, 0.2]].forEach(([c, ox, oy]) =>
+            box(scene, 0.25, 0.25, 0.01, cx + ox, 1.4 + oy, cz - 1.17, c));
+        // Lines/charts drawn on board
+        box(scene, 0.8, 0.015, 0.01, cx + 0.2, 1.6, cz - 1.17, '#ef4444', 0, 0, 0.2);
+        box(scene, 0.4, 0.015, 0.01, cx + 0.7, 1.7, cz - 1.17, '#06b6d4', 0, 0, -0.4);
+        // Standing Podium / Mat
+        box(scene, 1.2, 0.02, 0.8, cx, 0.01, cz - 0.2, '#1a1a2e'); // anti-fatigue mat
+        box(scene, 0.6, 0.9, 0.4, cx + 1.2, 0.45, cz - 0.4, '#2d2d4a'); // small side podium/desk
+        box(scene, 0.65, 0.04, 0.45, cx + 1.2, 0.9, cz - 0.4, '#1a1a2e', 0.1, 0, 0); // tilted top
     }
 
     // ─── LOUNGE (center, cx:0 cz:0) ──────────────────────────────────────────

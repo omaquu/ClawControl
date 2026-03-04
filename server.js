@@ -1267,7 +1267,8 @@ function connectGateway() {
 
     try {
         gatewayWs = new WebSocket(OPENCLAW_GATEWAY_URL, {
-            headers: { Authorization: `Bearer ${OPENCLAW_GATEWAY_TOKEN}` }
+            headers: { Authorization: `Bearer ${OPENCLAW_GATEWAY_TOKEN}` },
+            rejectUnauthorized: false // Allow self-signed certs (Tailscale)
         });
 
         gatewayWs.on('open', () => {
