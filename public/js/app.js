@@ -27,6 +27,23 @@ async function apiFetch(url, opts = {}) {
 // Expose globally so dynamic ES-module pages can call window.apiFetch(...)
 window.apiFetch = apiFetch;
 
+// Convenience alias — new pages use window.api(path, opts)
+window.api = async (path, opts = {}) => {
+  if (!opts.headers) opts.headers = {};
+  if (currentSession) opts.headers['x-session-id'] = currentSession;
+  if (opts.body && typeof opts.body === 'string') opts.headers['Content-Type'] = 'application/json';
+  const fullPath = path.startsWith('/api') ? path : '/api' + path;
+  const res = await fetch(fullPath, opts);
+  if (res.status === 401) { handleLogout(); return null; }
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('json')) {
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'API error');
+    return data;
+  }
+  return await res.text();
+};
+
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 async function checkAuth() {
@@ -53,6 +70,7 @@ function showApp(username) {
   initGateway();
   loadWorkspaces();
   loadSidebarAgents();
+  window.updateNotifBadge?.();
 }
 
 function renderLoginPage() {
@@ -215,6 +233,16 @@ function initSSE() {
       if (event.type && (event.type.startsWith('AGENT_') || event.type === 'TASK_ASSIGNED')) {
         loadSidebarAgents();
       }
+      if (event.type === 'NOTIFICATION') {
+        window.updateNotifBadge?.();
+        window.showToast(event.payload?.title || 'New notification', 'info');
+      }
+      if (event.type === 'PROVIDER_HEALTH_CHANGED') {
+        window._providerRefresh?.();
+      }
+      if (event.type === 'GATEWAY_DISCONNECTED' || event.type === 'GATEWAY_CONNECTED') {
+        initGateway();
+      }
       // dispatch to page handlers
       window.dispatchEvent(new CustomEvent('mc:event', { detail: event }));
     } catch { }
@@ -227,9 +255,27 @@ function initGateway() {
     const dot = document.getElementById('gateway-dot');
     const label = document.getElementById('gateway-label');
     if (s && s.connected) { dot.className = 'status-dot online'; label.textContent = 'Gateway Online'; }
-    else { dot.className = 'status-dot offline'; label.textContent = 'Gateway Offline'; }
+    else {
+      dot.className = 'status-dot offline';
+      const errPart = s?.lastError ? ` (${s.lastError.slice(0, 40)})` : '';
+      const retryPart = s?.reconnectAttempts ? ` #${s.reconnectAttempts}` : '';
+      label.textContent = `Gateway Offline${retryPart}${errPart}`;
+      label.title = s?.lastError || '';
+    }
   }).catch(() => { });
 }
+
+// Notification badge helper
+window.updateNotifBadge = async function () {
+  try {
+    const r = await apiFetch('/notifications/unread-count');
+    const badge = document.getElementById('notif-nav-badge');
+    if (badge) {
+      badge.textContent = r?.count || 0;
+      badge.classList.toggle('hidden', !r?.count);
+    }
+  } catch { }
+};
 
 async function loadWorkspaces() {
   const sel = document.getElementById('workspace-selector');
@@ -310,6 +356,23 @@ document.getElementById('global-modal').addEventListener('click', (e) => {
   if (e.target === e.currentTarget) closeModal();
 });
 
+// showModal helper used by new page modules
+window.showModal = function (title, bodyHtml, buttons = []) {
+  const btns = buttons.map(b => `<button class="btn ${b.cls || 'btn-ghost'}" id="modal-btn-${b.label.replace(/\s+/g, '_')}">${b.label}</button>`).join('');
+  window.openModal(`
+    <div class="modal-header"><span class="modal-title">${title}</span>
+      <button class="icon-btn" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div>
+    <div class="modal-body" style="padding:1rem;">${bodyHtml}</div>
+    <div class="modal-footer" style="padding:0.75rem 1rem;display:flex;justify-content:flex-end;gap:0.5rem;border-top:1px solid var(--color-border);">${btns}</div>`);
+  buttons.forEach(b => {
+    const el = document.getElementById(`modal-btn-${b.label.replace(/\s+/g, '_')}`);
+    if (el && b.onClick) el.addEventListener('click', b.onClick);
+  });
+};
+
+// toast alias
+window.toast = (msg, type = 'info') => window.showToast(msg, type);
+
 // ─── Theme System ─────────────────────────────────────────────────────────────
 const PRESETS = {
   dark: { '--color-bg': '#0a0a0f', '--color-surface': '#13131a', '--color-card': '#1a1a24', '--color-sidebar': '#0d0d14', '--color-accent': '#6366f1', '--color-accent2': '#8b5cf6', '--color-text': '#e2e8f0', '--color-border': '#2a2a3a', '--color-success': '#10b981', '--color-warning': '#f59e0b', '--color-danger': '#ef4444' },
@@ -360,10 +423,16 @@ const PAGE_TITLES = {
   kanban: 'Mission Queue', chat: 'Agent Chat', consul: 'Consul',
   sessions: 'Sessions', costs: 'Costs', ratelimits: 'Rate Limits',
   agents: 'Agents', channels: 'Channels', files: 'Files',
-  health: 'Health', logs: 'Logs', crons: 'Crons', settings: 'Settings'
+  health: 'Health', logs: 'Logs', crons: 'Crons', settings: 'Settings',
+  providers: '🔌 Provider Gateway', memory: '🧠 Memory Browser',
+  search: '🔎 Global Search', notifications: '🔔 Notifications', office3d: '🏢 3D Office'
 };
 
-const PAGE_ORDER = ['kanban', 'chat', 'consul', 'sessions', 'costs', 'ratelimits', 'agents', 'channels', 'files', 'health', 'logs', 'crons', 'settings'];
+const PAGE_ORDER = [
+  'kanban', 'chat', 'consul', 'sessions', 'costs', 'ratelimits',
+  'agents', 'channels', 'files', 'health', 'logs', 'crons', 'settings',
+  'providers', 'memory', 'search', 'notifications', 'office3d'
+];
 
 async function navigateTo(page) {
   if (!PAGE_TITLES[page]) page = 'kanban';

@@ -90,6 +90,23 @@
         <a class="nav-item" data-page="settings" href="#settings">
           <i class="fa fa-gear"></i><span>Settings</span>
         </a>
+        <div class="nav-section-label">INTELLIGENCE</div>
+        <a class="nav-item" data-page="providers" href="#providers">
+          <i class="fa fa-plug"></i><span>Provider Gateway</span>
+        </a>
+        <a class="nav-item" data-page="memory" href="#memory">
+          <i class="fa fa-brain"></i><span>Memory Browser</span>
+        </a>
+        <a class="nav-item" data-page="search" href="#search">
+          <i class="fa fa-magnifying-glass"></i><span>Global Search</span>
+        </a>
+        <a class="nav-item" data-page="notifications" href="#notifications">
+          <i class="fa fa-bell"></i><span>Notifications</span>
+          <span class="nav-badge hidden" id="notif-nav-badge"></span>
+        </a>
+        <a class="nav-item" data-page="office3d" href="#office3d">
+          <i class="fa fa-building"></i><span>3D Office</span>
+        </a>
       </nav>
 
       <!-- Sidebar Footer -->
@@ -117,6 +134,10 @@
             <i class="fa fa-triangle-exclamation"></i>
             <span id="error-count">0</span>
           </div>
+          <button class="icon-btn" id="notif-bell-btn" title="Notifications" onclick="navigateTo('notifications')" style="position:relative;">
+            <i class="fa fa-bell"></i>
+            <span id="notif-topbar-badge" class="hidden" style="position:absolute;top:2px;right:2px;width:8px;height:8px;border-radius:50%;background:var(--color-danger);"></span>
+          </button>
           <div class="user-info">
             <i class="fa fa-user-astronaut"></i>
             <span id="username-display"></span>

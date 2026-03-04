@@ -94,9 +94,35 @@ async function initDb() {
         enabled INTEGER DEFAULT 1, last_run INTEGER, next_run INTEGER,
         created_at INTEGER DEFAULT (strftime('%s','now'))
       );
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY, type TEXT DEFAULT 'info', title TEXT NOT NULL,
+        body TEXT DEFAULT '', read INTEGER DEFAULT 0,
+        created_at INTEGER DEFAULT (strftime('%s','now'))
+      );
+      CREATE TABLE IF NOT EXISTS providers (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL,
+        base_url TEXT, api_key TEXT, models TEXT DEFAULT '[]',
+        priority INTEGER DEFAULT 0, enabled INTEGER DEFAULT 1,
+        health TEXT DEFAULT 'unknown', last_health_check INTEGER,
+        agent_scope TEXT DEFAULT 'global',
+        load_balance_mode TEXT DEFAULT 'priority',
+        created_at INTEGER DEFAULT (strftime('%s','now'))
+      );
     `;
     return new Promise((resolve, reject) => {
-        db.exec(schema, (err) => { if (err) reject(err); else resolve(); });
+        db.exec(schema, (err) => {
+            if (err) { reject(err); return; }
+            // Migrate existing sessions table — ignore if columns already exist
+            const migrations = [
+                'ALTER TABLE sessions ADD COLUMN context_tokens INTEGER DEFAULT 0',
+                'ALTER TABLE sessions ADD COLUMN context_window INTEGER DEFAULT 0',
+                'ALTER TABLE sessions ADD COLUMN project TEXT'
+            ];
+            let pending = migrations.length;
+            for (const sql of migrations) {
+                db.run(sql, () => { if (--pending === 0) resolve(); }); // ignore errors (already exists)
+            }
+        });
     });
 }
 
@@ -108,6 +134,7 @@ const OPENCLAW_GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1
 const OPENCLAW_GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || '';
 const MC_API_TOKEN = process.env.MC_API_TOKEN || '';
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+const GATEWAY_RETRY_BASE = parseInt(process.env.GATEWAY_RETRY_INTERVAL || '1000');
 const DATA_DIR = path.join(WORKSPACE_DIR, 'data');
 const DB_PATH = process.env.DATABASE_PATH || path.join(WORKSPACE_DIR, 'clawcontrol.db');
 const CREDENTIALS_PATH = path.join(DATA_DIR, 'credentials.json');
@@ -725,8 +752,436 @@ app.get('/api/events', requireAuth, async (req, res) => {
 
 // ─── Gateway Info ─────────────────────────────────────────────────────────────
 app.get('/api/gateway/status', requireAuth, (req, res) => {
-    res.json({ url: OPENCLAW_GATEWAY_URL, connected: gatewayConnected });
+    res.json({
+        url: OPENCLAW_GATEWAY_URL,
+        connected: gatewayConnected,
+        lastError: gatewayLastError,
+        lastConnectedAt: gatewayLastConnectedAt,
+        reconnectAttempts: gatewayRetryAttempts
+    });
 });
+
+// ─── API: System — Network / PM2 / Docker ────────────────────────────────────
+app.get('/api/system/network', requireAuth, async (req, res) => {
+    try {
+        const nets = await si.networkStats();
+        res.json(nets.map(n => ({
+            iface: n.iface,
+            rx_sec: n.rx_sec,
+            tx_sec: n.tx_sec,
+            rx_bytes: n.rx_bytes,
+            tx_bytes: n.tx_bytes
+        })));
+    } catch (e) { res.json([]); }
+});
+
+app.get('/api/system/pm2', requireAuth, (req, res) => {
+    const { exec } = require('child_process');
+    exec('pm2 jlist', { timeout: 5000 }, (err, stdout) => {
+        if (err) return res.json({ error: 'PM2 not available or not running', processes: [] });
+        try {
+            const list = JSON.parse(stdout);
+            res.json({ processes: list.map(p => ({ name: p.name, pid: p.pid, status: p.pm2_env?.status, cpu: p.monit?.cpu, memory: p.monit?.memory, restarts: p.pm2_env?.restart_time })) });
+        } catch { res.json({ error: 'Could not parse PM2 output', processes: [] }); }
+    });
+});
+
+app.get('/api/system/docker', requireAuth, (req, res) => {
+    const { exec } = require('child_process');
+    exec('docker ps --format "{{json .}}"', { timeout: 5000 }, (err, stdout) => {
+        if (err) return res.json({ error: 'Docker not available', containers: [] });
+        try {
+            const containers = stdout.trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
+            res.json({ containers });
+        } catch { res.json({ error: 'Could not parse docker output', containers: [] }); }
+    });
+});
+
+// ─── API: Memory Browser ──────────────────────────────────────────────────────
+function findMemoryFiles(dir, baseDir, results = []) {
+    if (!fs.existsSync(dir)) return results;
+    try {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                // Recurse into workspace-* dirs inside OPENCLAW_DIR
+                if (dir === baseDir || entry.name.startsWith('workspace')) {
+                    findMemoryFiles(fullPath, baseDir, results);
+                }
+            } else if (['.md', '.txt', '.json'].includes(path.extname(entry.name).toLowerCase())) {
+                results.push({ path: path.relative(baseDir, fullPath).replace(/\\/g, '/'), name: entry.name, size: entry.size || fs.statSync(fullPath).size });
+            }
+        }
+    } catch { }
+    return results;
+}
+
+app.get('/api/memory', requireAuth, (req, res) => {
+    const files = findMemoryFiles(OPENCLAW_DIR, OPENCLAW_DIR);
+    res.json(files);
+});
+
+app.get('/api/memory/file', requireAuth, (req, res) => {
+    try {
+        const target = path.resolve(OPENCLAW_DIR, req.query.path || '');
+        if (!target.startsWith(OPENCLAW_DIR)) return res.status(400).json({ error: 'Path traversal blocked' });
+        const content = fs.readFileSync(target, 'utf8');
+        res.json({ content, path: req.query.path });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/memory/file', requireAuth, (req, res) => {
+    try {
+        const target = path.resolve(OPENCLAW_DIR, req.body.path || '');
+        if (!target.startsWith(OPENCLAW_DIR)) return res.status(400).json({ error: 'Path traversal blocked' });
+        if (fs.existsSync(target)) fs.copyFileSync(target, target + '.bak');
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.writeFileSync(target, req.body.content || '');
+        auditLog('memory_write', { path: req.body.path });
+        res.json({ ok: true });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/memory/search', requireAuth, (req, res) => {
+    const q = (req.query.q || '').toLowerCase().trim();
+    if (!q) return res.json([]);
+    const files = findMemoryFiles(OPENCLAW_DIR, OPENCLAW_DIR);
+    const results = [];
+    for (const f of files.slice(0, 200)) {
+        try {
+            const target = path.resolve(OPENCLAW_DIR, f.path);
+            const content = fs.readFileSync(target, 'utf8');
+            const lines = content.split('\n');
+            for (let i = 0; i < lines.length; i++) {
+                if (lines[i].toLowerCase().includes(q)) {
+                    results.push({ file: f.path, line: i + 1, snippet: lines[i].trim().slice(0, 200) });
+                    if (results.length >= 100) break;
+                }
+            }
+        } catch { }
+        if (results.length >= 100) break;
+    }
+    res.json(results);
+});
+
+// ─── API: Global Search ───────────────────────────────────────────────────────
+app.get('/api/search', requireAuth, (req, res) => {
+    const q = (req.query.q || '').toLowerCase().trim();
+    const scope = req.query.scope || 'all'; // all | memory | files
+    if (!q || q.length < 2) return res.json([]);
+    const results = [];
+
+    function searchDir(dir, baseDir, label) {
+        if (!fs.existsSync(dir)) return;
+        try {
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+                if (results.length >= 150) return;
+                const fullPath = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                    if (!entry.name.startsWith('.') && entry.name !== 'node_modules') searchDir(fullPath, baseDir, label);
+                } else if (['.md', '.txt', '.json', '.js', '.ts', '.py', '.sh'].includes(path.extname(entry.name).toLowerCase())) {
+                    try {
+                        const content = fs.readFileSync(fullPath, 'utf8');
+                        const lines = content.split('\n');
+                        for (let i = 0; i < lines.length; i++) {
+                            if (lines[i].toLowerCase().includes(q)) {
+                                results.push({ source: label, file: path.relative(baseDir, fullPath).replace(/\\/g, '/'), line: i + 1, snippet: lines[i].trim().slice(0, 200) });
+                                if (results.length >= 150) return;
+                            }
+                        }
+                    } catch { }
+                }
+            }
+        } catch { }
+    }
+
+    if (scope === 'all' || scope === 'memory') searchDir(OPENCLAW_DIR, OPENCLAW_DIR, 'memory');
+    if (scope === 'all' || scope === 'files') searchDir(WORKSPACE_DIR, WORKSPACE_DIR, 'workspace');
+    res.json(results);
+});
+
+// ─── API: Notifications ───────────────────────────────────────────────────────
+app.get('/api/notifications', requireAuth, async (req, res) => {
+    const rows = await dbAll('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 100');
+    res.json(rows);
+});
+
+app.post('/api/notifications', requireAuth, async (req, res) => {
+    const id = crypto.randomUUID();
+    const { type = 'info', title, body } = req.body;
+    if (!title) return res.status(400).json({ error: 'Title required' });
+    await dbRun('INSERT INTO notifications (id,type,title,body) VALUES (?,?,?,?)', [id, type, title, body || '']);
+    broadcastEvent({ type: 'NOTIFICATION', payload: { id, type, title, body } });
+    res.json({ id });
+});
+
+app.put('/api/notifications/:id/read', requireAuth, async (req, res) => {
+    await dbRun('UPDATE notifications SET read=1 WHERE id=?', [req.params.id]);
+    res.json({ ok: true });
+});
+
+app.post('/api/notifications/read-all', requireAuth, async (req, res) => {
+    await dbRun('UPDATE notifications SET read=1 WHERE read=0');
+    res.json({ ok: true });
+});
+
+app.delete('/api/notifications/:id', requireAuth, async (req, res) => {
+    await dbRun('DELETE FROM notifications WHERE id=?', [req.params.id]);
+    res.json({ ok: true });
+});
+
+app.get('/api/notifications/unread-count', requireAuth, async (req, res) => {
+    const row = await dbGet('SELECT COUNT(*) as count FROM notifications WHERE read=0');
+    res.json({ count: row ? row.count : 0 });
+});
+
+// ─── API: Activity Heatmap ────────────────────────────────────────────────────
+app.get('/api/events/heatmap', requireAuth, async (req, res) => {
+    const days = Math.min(parseInt(req.query.days || '90'), 365);
+    const since = Math.floor(Date.now() / 1000) - days * 86400;
+    const rows = await dbAll(
+        `SELECT date(created_at, 'unixepoch') as day, COUNT(*) as count
+         FROM events WHERE created_at >= ? GROUP BY day ORDER BY day ASC`,
+        [since]
+    );
+    res.json(rows);
+});
+
+
+// ─── API: Providers (API Gateway / Router) ────────────────────────────────────
+
+// Simple AES-256-GCM encryption for API keys at rest
+const ENCRYPT_KEY = crypto.createHash('sha256').update(RECOVERY_TOKEN).digest(); // 32 bytes
+function encryptKey(plain) {
+    if (!plain) return '';
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', ENCRYPT_KEY, iv);
+    const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return iv.toString('hex') + ':' + tag.toString('hex') + ':' + enc.toString('hex');
+}
+function decryptKey(stored) {
+    if (!stored || !stored.includes(':')) return stored || '';
+    try {
+        const [ivHex, tagHex, encHex] = stored.split(':');
+        const decipher = crypto.createDecipheriv('aes-256-gcm', ENCRYPT_KEY, Buffer.from(ivHex, 'hex'));
+        decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+        return Buffer.concat([decipher.update(Buffer.from(encHex, 'hex')), decipher.final()]).toString('utf8');
+    } catch { return ''; }
+}
+function maskKey(k) { if (!k || k.length < 8) return '••••••••'; return k.slice(0, 4) + '••••••••' + k.slice(-4); }
+
+function formatProvider(p) {
+    return { ...p, models: JSON.parse(p.models || '[]'), enabled: !!p.enabled, api_key: maskKey(decryptKey(p.api_key)) };
+}
+
+app.get('/api/providers', requireAuth, async (req, res) => {
+    const rows = await dbAll('SELECT * FROM providers ORDER BY priority ASC, created_at ASC');
+    res.json(rows.map(formatProvider));
+});
+
+app.get('/api/providers/status', requireAuth, async (req, res) => {
+    const rows = await dbAll('SELECT id,name,type,health,last_health_check,enabled,priority,agent_scope,load_balance_mode FROM providers ORDER BY priority ASC');
+    res.json(rows.map(r => ({ ...r, enabled: !!r.enabled })));
+});
+
+app.post('/api/providers', requireAuth, async (req, res) => {
+    const id = crypto.randomUUID();
+    const { name, type, base_url, api_key, models = [], priority = 0, agent_scope = 'global', load_balance_mode = 'priority' } = req.body;
+    if (!name || !type) return res.status(400).json({ error: 'name and type required' });
+    const encKey = encryptKey(api_key || '');
+    await dbRun('INSERT INTO providers (id,name,type,base_url,api_key,models,priority,agent_scope,load_balance_mode) VALUES (?,?,?,?,?,?,?,?,?)',
+        [id, name, type, base_url || '', encKey, JSON.stringify(models), priority, agent_scope, load_balance_mode]);
+    broadcastEvent({ type: 'PROVIDER_CREATED', payload: { id, name, type } });
+    res.json({ id });
+});
+
+app.put('/api/providers/:id', requireAuth, async (req, res) => {
+    const p = await dbGet('SELECT * FROM providers WHERE id=?', [req.params.id]);
+    if (!p) return res.status(404).json({ error: 'Not found' });
+    const { name, type, base_url, api_key, models, priority, enabled, agent_scope, load_balance_mode } = req.body;
+    const encKey = api_key !== undefined ? encryptKey(api_key) : p.api_key;
+    await dbRun(`UPDATE providers SET
+        name=COALESCE(?,name), type=COALESCE(?,type), base_url=COALESCE(?,base_url),
+        api_key=COALESCE(?,api_key), models=COALESCE(?,models), priority=COALESCE(?,priority),
+        enabled=COALESCE(?,enabled), agent_scope=COALESCE(?,agent_scope),
+        load_balance_mode=COALESCE(?,load_balance_mode) WHERE id=?`,
+        [name || null, type || null, base_url || null, encKey || null,
+        models ? JSON.stringify(models) : null,
+        priority !== undefined ? priority : null,
+        enabled !== undefined ? (enabled ? 1 : 0) : null,
+        agent_scope || null, load_balance_mode || null, req.params.id]);
+    broadcastEvent({ type: 'PROVIDER_UPDATED', payload: { id: req.params.id } });
+    res.json({ ok: true });
+});
+
+app.delete('/api/providers/:id', requireAuth, async (req, res) => {
+    await dbRun('DELETE FROM providers WHERE id=?', [req.params.id]);
+    res.json({ ok: true });
+});
+
+// Bulk reorder priorities
+app.post('/api/providers/reorder', requireAuth, async (req, res) => {
+    const { order } = req.body; // [{ id, priority }]
+    if (!Array.isArray(order)) return res.status(400).json({ error: 'order must be an array' });
+    for (const { id, priority } of order) {
+        await dbRun('UPDATE providers SET priority=? WHERE id=?', [priority, id]);
+    }
+    res.json({ ok: true });
+});
+
+// Test a provider connection
+app.post('/api/providers/:id/test', requireAuth, async (req, res) => {
+    const p = await dbGet('SELECT * FROM providers WHERE id=?', [req.params.id]);
+    if (!p) return res.status(404).json({ error: 'Not found' });
+    const apiKey = decryptKey(p.api_key);
+    const result = await pingProvider(p.type, p.base_url, apiKey);
+    // Update health in DB
+    await dbRun('UPDATE providers SET health=?, last_health_check=? WHERE id=?',
+        [result.healthy ? 'healthy' : 'down', Math.floor(Date.now() / 1000), p.id]);
+    broadcastEvent({ type: 'PROVIDER_HEALTH_CHANGED', payload: { id: p.id, health: result.healthy ? 'healthy' : 'down' } });
+    res.json(result);
+});
+
+// Provider-aware proxy: POST /api/proxy/chat
+// Body: { messages: [...], agentId?: string, model?: string }
+app.post('/api/proxy/chat', requireAuth, async (req, res) => {
+    const { messages, agentId, model } = req.body;
+    if (!messages) return res.status(400).json({ error: 'messages required' });
+
+    // Resolve provider list: agent-scoped first, then global
+    let providers = await dbAll('SELECT * FROM providers WHERE enabled=1 ORDER BY priority ASC');
+    if (agentId) {
+        const agentScoped = providers.filter(p => p.agent_scope === agentId);
+        const global = providers.filter(p => p.agent_scope === 'global');
+        providers = [...agentScoped, ...global];
+    }
+
+    if (providers.length === 0) return res.status(503).json({ error: 'No providers configured or all disabled' });
+
+    for (const p of providers) {
+        const apiKey = decryptKey(p.api_key);
+        try {
+            const response = await proxyToProvider(p, apiKey, messages, model);
+            res.setHeader('X-Provider-Used', p.name);
+            res.setHeader('X-Provider-Id', p.id);
+            return res.json(response);
+        } catch (err) {
+            console.warn(`⚠️  [Proxy] Provider "${p.name}" failed: ${err.message} — trying next...`);
+        }
+    }
+    res.status(503).json({ error: 'All providers failed' });
+});
+
+// Helper: ping a provider to check health
+async function pingProvider(type, baseUrl, apiKey) {
+    const start = Date.now();
+    try {
+        const { default: https } = await import('https');
+        const { default: http_mod } = await import('http');
+        const endpoints = {
+            anthropic: { host: 'api.anthropic.com', path: '/v1/models', headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' } },
+            openai: { host: 'api.openai.com', path: '/v1/models', headers: { 'Authorization': `Bearer ${apiKey}` } },
+            google: { host: 'generativelanguage.googleapis.com', path: `/v1beta/models?key=${apiKey}`, headers: {} },
+            openrouter: { host: 'openrouter.ai', path: '/api/v1/models', headers: { 'Authorization': `Bearer ${apiKey}` } },
+        };
+        const ep = endpoints[type] || (baseUrl ? { host: new URL(baseUrl).host, path: '/v1/models', headers: { 'Authorization': `Bearer ${apiKey}` } } : null);
+        if (!ep) return { healthy: false, latency: null, error: 'Unknown provider type and no base_url' };
+
+        await new Promise((resolve, reject) => {
+            const mod = ep.host.startsWith('localhost') || ep.host.startsWith('127.') ? http_mod : https;
+            const req = mod.get({ host: ep.host, path: ep.path, headers: ep.headers, timeout: 5000 }, r => {
+                r.resume();
+                if (r.statusCode < 500) resolve(); else reject(new Error(`HTTP ${r.statusCode}`));
+            });
+            req.on('error', reject);
+            req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+        });
+        return { healthy: true, latency: Date.now() - start };
+    } catch (e) {
+        return { healthy: false, latency: Date.now() - start, error: e.message };
+    }
+}
+
+// Helper: forward chat request to provider
+async function proxyToProvider(p, apiKey, messages, modelOverride) {
+    const https_mod = require('https');
+    const http_mod = require('http');
+    const models = JSON.parse(p.models || '[]');
+    const model = modelOverride || models[0] || 'claude-3-5-haiku-20241022';
+
+    const payloads = {
+        anthropic: {
+            host: 'api.anthropic.com', path: '/v1/messages',
+            headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model, max_tokens: 4096, messages })
+        },
+        openai: {
+            host: 'api.openai.com', path: '/v1/chat/completions',
+            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: modelOverride || models[0] || 'gpt-4o-mini', messages })
+        },
+        openrouter: {
+            host: 'openrouter.ai', path: '/api/v1/chat/completions',
+            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://clawcontrol' },
+            body: JSON.stringify({ model: modelOverride || models[0] || 'openai/gpt-4o-mini', messages })
+        },
+    };
+
+    let ep = payloads[p.type];
+    if (!ep && p.base_url) {
+        // Custom / local provider (Ollama, LM Studio, etc.)
+        const url = new URL('/v1/chat/completions', p.base_url);
+        ep = {
+            host: url.hostname, path: url.pathname + url.search, port: url.port || undefined,
+            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: modelOverride || models[0] || 'llama3', messages })
+        };
+    }
+    if (!ep) throw new Error(`No proxy config for type: ${p.type}`);
+
+    return new Promise((resolve, reject) => {
+        const isLocal = ep.host === 'localhost' || ep.host === '127.0.0.1' || ep.host === 'host.docker.internal';
+        const mod = isLocal ? http_mod : https_mod;
+        const body = ep.body;
+        const opts = { host: ep.host, port: ep.port, path: ep.path, method: 'POST', headers: { ...ep.headers, 'Content-Length': Buffer.byteLength(body) }, timeout: 30000 };
+        const req = mod.request(opts, r => {
+            let data = '';
+            r.on('data', c => data += c);
+            r.on('end', () => {
+                if (r.statusCode >= 400) reject(new Error(`HTTP ${r.statusCode}: ${data.slice(0, 200)}`));
+                else { try { resolve(JSON.parse(data)); } catch { resolve({ raw: data }); } }
+            });
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')); });
+        req.write(body);
+        req.end();
+    });
+}
+
+// Background health poller — runs every 60 seconds
+function startHealthPoller() {
+    async function poll() {
+        const providers = await dbAll('SELECT * FROM providers WHERE enabled=1');
+        for (const p of providers) {
+            const apiKey = decryptKey(p.api_key);
+            const result = await pingProvider(p.type, p.base_url, apiKey);
+            const health = result.healthy ? 'healthy' : 'down';
+            if (p.health !== health) {
+                await dbRun('UPDATE providers SET health=?, last_health_check=? WHERE id=?',
+                    [health, Math.floor(Date.now() / 1000), p.id]);
+                broadcastEvent({ type: 'PROVIDER_HEALTH_CHANGED', payload: { id: p.id, name: p.name, health, latency: result.latency } });
+                console.log(`🔋 [Providers] ${p.name}: ${p.health} → ${health}`);
+            } else {
+                await dbRun('UPDATE providers SET last_health_check=? WHERE id=?', [Math.floor(Date.now() / 1000), p.id]);
+            }
+        }
+    }
+    // Initial poll after 10s, then every 60s
+    setTimeout(() => { poll().catch(() => { }); setInterval(() => poll().catch(() => { }), 60000); }, 10000);
+}
 
 // ─── Static Files ─────────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
@@ -773,9 +1228,14 @@ wss.on('connection', (ws, req) => {
     ws.on('close', () => { try { pty.kill(); } catch { } });
 });
 
-// Gateway WebSocket Proxy
+// ─── Gateway WebSocket Proxy ──────────────────────────────────────────────────
 let gatewayConnected = false;
 let gatewayWs = null;
+let gatewayRetryAttempts = 0;
+let gatewayLastError = null;
+let gatewayLastConnectedAt = null;
+let gatewayRetryTimer = null;
+
 const gatewayClients = new WebSocketServer({ server, path: '/ws/gateway' });
 gatewayClients.on('connection', (ws, req) => {
     const sessionId = new URL(req.url, 'http://localhost').searchParams.get('sessionId');
@@ -786,25 +1246,69 @@ gatewayClients.on('connection', (ws, req) => {
 });
 
 function connectGateway() {
-    if (!OPENCLAW_GATEWAY_URL || !OPENCLAW_GATEWAY_TOKEN) return;
+    if (!OPENCLAW_GATEWAY_URL) {
+        console.log('⚠️  [Gateway] OPENCLAW_GATEWAY_URL not set — gateway disabled.');
+        return;
+    }
+    if (!OPENCLAW_GATEWAY_TOKEN) {
+        console.log('⚠️  [Gateway] OPENCLAW_GATEWAY_TOKEN not set — gateway disabled.');
+        return;
+    }
+
+    // Validate scheme
+    if (!OPENCLAW_GATEWAY_URL.startsWith('ws://') && !OPENCLAW_GATEWAY_URL.startsWith('wss://')) {
+        console.error(`❌ [Gateway] Invalid URL scheme: "${OPENCLAW_GATEWAY_URL}"`);
+        console.error('   ℹ️  OPENCLAW_GATEWAY_URL must start with ws:// or wss://');
+        console.error('   ℹ️  Example: ws://host.docker.internal:18789');
+        return;
+    }
+
+    console.log(`🔌 [Gateway] Trying to connect to ${OPENCLAW_GATEWAY_URL} (attempt ${gatewayRetryAttempts + 1})...`);
+
     try {
-        gatewayWs = new WebSocket(OPENCLAW_GATEWAY_URL, { headers: { Authorization: `Bearer ${OPENCLAW_GATEWAY_TOKEN}` } });
+        gatewayWs = new WebSocket(OPENCLAW_GATEWAY_URL, {
+            headers: { Authorization: `Bearer ${OPENCLAW_GATEWAY_TOKEN}` }
+        });
+
         gatewayWs.on('open', () => {
             gatewayConnected = true;
-            console.log(`🔗 Connected to OpenClaw Gateway: ${OPENCLAW_GATEWAY_URL}`);
+            gatewayRetryAttempts = 0;
+            gatewayLastError = null;
+            gatewayLastConnectedAt = Date.now();
+            console.log(`✅ [Gateway] Connected to ${OPENCLAW_GATEWAY_URL}`);
             broadcastEvent({ type: 'GATEWAY_CONNECTED', payload: { url: OPENCLAW_GATEWAY_URL } });
         });
+
         gatewayWs.on('message', (data) => {
             broadcastEvent({ type: 'GATEWAY_MSG', payload: { raw: data.toString() } });
             gatewayClients.clients.forEach(c => { try { c.send(data); } catch { } });
         });
-        gatewayWs.on('close', () => {
+
+        gatewayWs.on('close', (code, reason) => {
             gatewayConnected = false;
-            broadcastEvent({ type: 'GATEWAY_DISCONNECTED', payload: {} });
-            setTimeout(connectGateway, 5000);
+            const reasonStr = reason ? reason.toString() : 'no reason given';
+            const delay = Math.min(GATEWAY_RETRY_BASE * Math.pow(2, gatewayRetryAttempts), 30000);
+            gatewayRetryAttempts++;
+            console.log(`🔌 [Gateway] Disconnected (code ${code}: ${reasonStr}). Reconnecting in ${delay}ms...`);
+            broadcastEvent({ type: 'GATEWAY_DISCONNECTED', payload: { code, reason: reasonStr } });
+            if (gatewayRetryTimer) clearTimeout(gatewayRetryTimer);
+            gatewayRetryTimer = setTimeout(connectGateway, delay);
         });
-        gatewayWs.on('error', () => { });
-    } catch { }
+
+        gatewayWs.on('error', (err) => {
+            gatewayLastError = err.message || String(err);
+            console.error(`❌ [Gateway] Connection error: ${gatewayLastError}`);
+            // 'close' will fire after 'error', which handles reconnect scheduling
+        });
+
+    } catch (err) {
+        const delay = Math.min(GATEWAY_RETRY_BASE * Math.pow(2, gatewayRetryAttempts), 30000);
+        gatewayRetryAttempts++;
+        gatewayLastError = err.message || String(err);
+        console.error(`❌ [Gateway] Failed to create WebSocket: ${gatewayLastError}. Retrying in ${delay}ms...`);
+        if (gatewayRetryTimer) clearTimeout(gatewayRetryTimer);
+        gatewayRetryTimer = setTimeout(connectGateway, delay);
+    }
 }
 connectGateway();
 
@@ -814,6 +1318,7 @@ initDb().then(() => {
         console.log(`🚀 ClawControl listening on http://localhost:${PORT}`);
         console.log(`📁 Workspace: ${WORKSPACE_DIR}`);
         console.log(`🗄  Database: ${DB_PATH}`);
+        startHealthPoller();
     });
 }).catch(err => {
     console.error('❌ DB init failed:', err);

@@ -15,12 +15,13 @@ services:
       - DATABASE_PATH=/data/clawcontrol.db
       - WORKSPACE_DIR=/workspace
       - OPENCLAW_DIR=/workspace
-      - OPENCLAW_GATEWAY_URL=${OPENCLAW_GATEWAY_URL:-http://host.docker.internal:3000}
+      - OPENCLAW_GATEWAY_URL=${OPENCLAW_GATEWAY_URL:-ws://host.docker.internal:18789}
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
       - DASHBOARD_TOKEN=${DASHBOARD_TOKEN:-}
       - MC_API_TOKEN=${MC_API_TOKEN:-}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
       - DASHBOARD_ALLOW_HTTP=${DASHBOARD_ALLOW_HTTP:-false}
+      - GATEWAY_RETRY_INTERVAL=${GATEWAY_RETRY_INTERVAL:-1000}
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
