@@ -77,15 +77,15 @@
         <form id="register-form">
           <div class="form-group">
             <label class="form-label">Username</label>
-            <input class="form-input" type="text" id="reg-user" required>
+            <input class="form-input" type="text" id="reg-user" autocomplete="username" required>
           </div>
           <div class="form-group">
             <label class="form-label">Password (min 8 chars)</label>
-            <input class="form-input" type="password" id="reg-pass" required minlength="8">
+            <input class="form-input" type="password" id="reg-pass" autocomplete="new-password" required minlength="8">
           </div>
           <div class="form-group">
             <label class="form-label">Confirm Password</label>
-            <input class="form-input" type="password" id="reg-pass2" required>
+            <input class="form-input" type="password" id="reg-pass2" autocomplete="new-password" required>
           </div>
           <button class="btn btn-primary w-full" type="submit">
             <i class="fa fa-user-plus"></i> Create Account
@@ -103,10 +103,11 @@
         <div id="rec-error" class="auth-error hidden"></div>
         <form id="recover-form">
           <div class="form-group"><label class="form-label">Recovery Token</label>
-            <input class="form-input" type="text" id="rec-token" placeholder="From server startup logs" required>
+            <input class="form-input" type="text" id="rec-token" placeholder="From server startup logs"
+              autocomplete="off" required>
           </div>
           <div class="form-group"><label class="form-label">New Password</label>
-            <input class="form-input" type="password" id="rec-pass" required minlength="8">
+            <input class="form-input" type="password" id="rec-pass" autocomplete="new-password" required minlength="8">
           </div>
           <button type="submit" class="btn btn-primary w-full"><i class="fa fa-rotate"></i> Reset Password</button>
         </form>

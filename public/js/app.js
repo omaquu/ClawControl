@@ -15,7 +15,10 @@ async function apiFetch(url, opts = {}) {
     opts.body = JSON.stringify(opts.body);
   }
   const res = await fetch('/api' + url, opts);
-  if (res.status === 401) { handleLogout(); return null; }
+  if (res.status === 401 && !url.includes('/auth/logout')) {
+    handleLogout();
+    return null;
+  }
   const ct = res.headers.get('content-type') || '';
   if (ct.includes('json')) {
     const data = await res.json();
@@ -34,7 +37,10 @@ window.api = async (path, opts = {}) => {
   if (opts.body && typeof opts.body === 'string') opts.headers['Content-Type'] = 'application/json';
   const fullPath = path.startsWith('/api') ? path : '/api' + path;
   const res = await fetch(fullPath, opts);
-  if (res.status === 401) { handleLogout(); return null; }
+  if (res.status === 401 && !fullPath.includes('/auth/logout')) {
+    handleLogout();
+    return null;
+  }
   const ct = res.headers.get('content-type') || '';
   if (ct.includes('json')) {
     const data = await res.json();
@@ -79,6 +85,11 @@ function showApp(username) {
   loadWorkspaces();
   loadSidebarAgents();
   window.updateNotifBadge?.();
+
+  // Start background polling only after login
+  if (!window._sidebarPoll) {
+    window._sidebarPoll = setInterval(loadSidebarAgents, 15000);
+  }
 }
 
 // Global expose for inline onclicks in index.html
@@ -137,7 +148,7 @@ document.addEventListener('submit', async (e) => {
   }
   else if (e.target.id === 'recover-form') {
     e.preventDefault();
-    window.doReset();
+    window.doReset(e);
   }
 });
 
