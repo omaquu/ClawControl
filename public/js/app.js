@@ -59,8 +59,16 @@ async function checkAuth() {
 function showAuthPage(type) {
   document.getElementById('app-shell').classList.add('hidden');
   document.getElementById('auth-guard').classList.remove('hidden');
-  document.getElementById('auth-guard').innerHTML = type === 'register' ? renderRegisterPage() : renderLoginPage();
+
+  // Hide all auth pages first
+  document.querySelectorAll('.auth-page').forEach(el => el.classList.add('hidden'));
+
+  // Show the requested one
+  const target = document.getElementById(`auth-${type}`);
+  if (target) target.classList.remove('hidden');
 }
+
+window.showAuthPage = showAuthPage;
 
 function showApp(username) {
   document.getElementById('auth-guard').classList.add('hidden');
@@ -73,111 +81,28 @@ function showApp(username) {
   window.updateNotifBadge?.();
 }
 
-function renderLoginPage() {
-  return `
-  <div class="auth-page">
-    <div class="auth-box">
-      <div class="auth-logo">
-        <i class="fa fa-satellite-dish"></i>
-        <h1>ClawControl</h1>
-        <p>OpenClaw Operations Dashboard</p>
-      </div>
-      <div id="auth-error" class="auth-error hidden"></div>
-      <form id="login-form">
-        <div class="form-group">
-          <label class="form-label">Username</label>
-          <input class="form-input" type="text" id="login-user" autocomplete="username" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Password</label>
-          <input class="form-input" type="password" id="login-pass" autocomplete="current-password" required>
-        </div>
-        <div class="form-group hidden" id="totp-group">
-          <label class="form-label">Authenticator Code</label>
-          <input class="form-input" type="text" id="login-totp" placeholder="6-digit code" maxlength="6" autocomplete="one-time-code">
-        </div>
-        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;">
-          <input type="checkbox" id="remember-me" style="width:auto;">
-          <label style="font-size:0.8rem;color:var(--color-text-muted);" for="remember-me">Remember me (3h)</label>
-        </div>
-        <button class="btn btn-primary w-full" type="submit" id="login-btn">
-          <i class="fa fa-right-to-bracket"></i> Login
-        </button>
-      </form>
-      <div style="text-align:center;margin-top:1rem;">
-        <a href="#" onclick="showForgotPassword()" style="font-size:0.78rem;color:var(--color-text-muted);">Forgot password?</a>
-      </div>
-    </div>
-  </div>`;
-}
-
-function renderRegisterPage() {
-  return `
-  <div class="auth-page">
-    <div class="auth-box">
-      <div class="auth-logo">
-        <i class="fa fa-satellite-dish"></i>
-        <h1>ClawControl</h1>
-        <p>First-time setup — create your account</p>
-      </div>
-      <div id="auth-error" class="auth-error hidden"></div>
-      <form id="register-form">
-        <div class="form-group">
-          <label class="form-label">Username</label>
-          <input class="form-input" type="text" id="reg-user" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Password (min 8 chars)</label>
-          <input class="form-input" type="password" id="reg-pass" required minlength="8">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Confirm Password</label>
-          <input class="form-input" type="password" id="reg-pass2" required>
-        </div>
-        <button class="btn btn-primary w-full" type="submit">
-          <i class="fa fa-user-plus"></i> Create Account
-        </button>
-      </form>
-    </div>
-  </div>`;
-}
-
-window.showForgotPassword = function () {
-  document.getElementById('auth-guard').innerHTML = `
-  <div class="auth-page">
-    <div class="auth-box">
-      <div class="auth-logo"><i class="fa fa-key"></i><h1>Password Recovery</h1></div>
-      <div id="auth-error" class="auth-error hidden"></div>
-      <div class="form-group"><label class="form-label">Recovery Token</label>
-        <input class="form-input" type="text" id="rec-token" placeholder="From server startup logs"></div>
-      <div class="form-group"><label class="form-label">New Password</label>
-        <input class="form-input" type="password" id="rec-pass"></div>
-      <button class="btn btn-primary w-full" onclick="doReset()"><i class="fa fa-rotate"></i> Reset Password</button>
-      <div style="text-align:center;margin-top:0.75rem;">
-        <a href="#" onclick="showAuthPage('login')" style="font-size:0.78rem;color:var(--color-text-muted);">Back to login</a>
-      </div>
-    </div>
-  </div>`;
-};
-
-window.doReset = async function () {
+// Global expose for inline onclicks in index.html
+window.doReset = async function (e) {
+  if (e) e.preventDefault();
   const token = document.getElementById('rec-token').value;
   const pw = document.getElementById('rec-pass').value;
   try {
     await apiFetch('/auth/reset-password', { method: 'POST', body: { token, newPassword: pw } });
-    showToast('Password reset! Please login.', 'success');
+    window.showToast('Password reset! Please login.', 'success');
     showAuthPage('login');
-  } catch (e) { showAuthError(e.message); }
+  } catch (e) { showAuthError(e.message, 'rec-error'); }
 };
 
-function showAuthError(msg) {
-  const el = document.getElementById('auth-error');
+// Removed old duplicate doReset
+function showAuthError(msg, id = 'login-error') {
+  const el = document.getElementById(id);
   if (el) { el.textContent = msg; el.classList.remove('hidden'); }
 }
 
 document.addEventListener('submit', async (e) => {
   if (e.target.id === 'login-form') {
     e.preventDefault();
+    document.getElementById('login-error')?.classList.add('hidden');
     const username = document.getElementById('login-user').value;
     const password = document.getElementById('login-pass').value;
     const totp = document.getElementById('login-totp')?.value;
@@ -195,19 +120,24 @@ document.addEventListener('submit', async (e) => {
       storage.setItem('mc_session', res.sessionId);
       showApp(res.username);
       navigateTo(currentPage || 'kanban');
-    } catch (e) { showAuthError(e.message); }
+    } catch (err) { showAuthError(err.message, 'login-error'); }
   }
-  if (e.target.id === 'register-form') {
+  else if (e.target.id === 'register-form') {
     e.preventDefault();
+    document.getElementById('reg-error')?.classList.add('hidden');
     const username = document.getElementById('reg-user').value;
     const password = document.getElementById('reg-pass').value;
     const pw2 = document.getElementById('reg-pass2').value;
-    if (password !== pw2) { showAuthError('Passwords do not match'); return; }
+    if (password !== pw2) { showAuthError('Passwords do not match', 'reg-error'); return; }
     try {
       await apiFetch('/auth/register', { method: 'POST', body: { username, password } });
-      showToast('Account created! Please login.', 'success');
+      window.showToast('Account created! Please login.', 'success');
       showAuthPage('login');
-    } catch (e) { showAuthError(e.message); }
+    } catch (err) { showAuthError(err.message, 'reg-error'); }
+  }
+  else if (e.target.id === 'recover-form') {
+    e.preventDefault();
+    window.doReset();
   }
 });
 

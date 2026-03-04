@@ -16,7 +16,107 @@
 
 <body>
   <!-- Auth Guard -->
-  <div id="auth-guard" class="hidden"></div>
+  <div id="auth-guard">
+    <!-- Loading State -->
+    <div id="auth-loading" class="auth-page">
+      <div class="auth-box" style="text-align:center;">
+        <div class="auth-logo"><i class="fa fa-satellite-dish fa-spin"></i>
+          <h1>ClawControl</h1>
+          <p>Connecting...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Login Page -->
+    <div id="auth-login" class="auth-page hidden">
+      <div class="auth-box">
+        <div class="auth-logo">
+          <i class="fa fa-satellite-dish"></i>
+          <h1>ClawControl</h1>
+          <p>OpenClaw Operations Dashboard</p>
+        </div>
+        <div id="login-error" class="auth-error hidden"></div>
+        <form id="login-form">
+          <div class="form-group">
+            <label class="form-label">Username</label>
+            <input class="form-input" type="text" id="login-user" autocomplete="username" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input class="form-input" type="password" id="login-pass" autocomplete="current-password" required>
+          </div>
+          <div class="form-group hidden" id="totp-group">
+            <label class="form-label">Authenticator Code</label>
+            <input class="form-input" type="text" id="login-totp" placeholder="6-digit code" maxlength="6"
+              autocomplete="one-time-code">
+          </div>
+          <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;">
+            <input type="checkbox" id="remember-me" style="width:auto;">
+            <label style="font-size:0.8rem;color:var(--color-text-muted);" for="remember-me">Remember me (3h)</label>
+          </div>
+          <button class="btn btn-primary w-full" type="submit" id="login-btn">
+            <i class="fa fa-right-to-bracket"></i> Login
+          </button>
+        </form>
+        <div style="text-align:center;margin-top:1rem;">
+          <a href="#" onclick="window.showAuthPage('recover')"
+            style="font-size:0.78rem;color:var(--color-text-muted);">Forgot password?</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Register Page -->
+    <div id="auth-register" class="auth-page hidden">
+      <div class="auth-box">
+        <div class="auth-logo">
+          <i class="fa fa-satellite-dish"></i>
+          <h1>ClawControl</h1>
+          <p>First-time setup — create your account</p>
+        </div>
+        <div id="reg-error" class="auth-error hidden"></div>
+        <form id="register-form">
+          <div class="form-group">
+            <label class="form-label">Username</label>
+            <input class="form-input" type="text" id="reg-user" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password (min 8 chars)</label>
+            <input class="form-input" type="password" id="reg-pass" required minlength="8">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Confirm Password</label>
+            <input class="form-input" type="password" id="reg-pass2" required>
+          </div>
+          <button class="btn btn-primary w-full" type="submit">
+            <i class="fa fa-user-plus"></i> Create Account
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Recover Password Page -->
+    <div id="auth-recover" class="auth-page hidden">
+      <div class="auth-box">
+        <div class="auth-logo"><i class="fa fa-key"></i>
+          <h1>Password Recovery</h1>
+        </div>
+        <div id="rec-error" class="auth-error hidden"></div>
+        <form id="recover-form">
+          <div class="form-group"><label class="form-label">Recovery Token</label>
+            <input class="form-input" type="text" id="rec-token" placeholder="From server startup logs" required>
+          </div>
+          <div class="form-group"><label class="form-label">New Password</label>
+            <input class="form-input" type="password" id="rec-pass" required minlength="8">
+          </div>
+          <button type="submit" class="btn btn-primary w-full"><i class="fa fa-rotate"></i> Reset Password</button>
+        </form>
+        <div style="text-align:center;margin-top:0.75rem;">
+          <a href="#" onclick="window.showAuthPage('login')"
+            style="font-size:0.78rem;color:var(--color-text-muted);">Back to login</a>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Main App Shell -->
   <div id="app-shell" class="app-shell hidden">
