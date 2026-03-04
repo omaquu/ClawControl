@@ -1268,8 +1268,11 @@ let gatewayRetryTimer = null;
 
 const gatewayClients = new WebSocketServer({ server, path: '/ws/gateway' });
 gatewayClients.on('connection', (ws, req) => {
-    const sessionId = new URL(req.url, 'http://localhost').searchParams.get('sessionId');
-    if (!sessions.has(sessionId)) { ws.close(4001, 'Unauthorized'); return; }
+    const url = new URL(req.url, 'http://localhost');
+    const sessionId = url.searchParams.get('sessionId');
+    const token = url.searchParams.get('token') || req.headers['authorization']?.replace('Bearer ', '');
+    const isAuthorized = (sessionId && sessions.has(sessionId)) || (token && MC_API_TOKEN && token === MC_API_TOKEN);
+    if (!isAuthorized) { ws.close(4001, 'Unauthorized'); return; }
     ws.on('message', msg => {
         if (gatewayWs && gatewayWs.readyState === WebSocket.OPEN) gatewayWs.send(msg);
     });
