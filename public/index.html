@@ -134,9 +134,15 @@
             <i class="fa fa-triangle-exclamation"></i>
             <span id="error-count">0</span>
           </div>
-          <button class="icon-btn" id="notif-bell-btn" title="Notifications" onclick="navigateTo('notifications')" style="position:relative;">
+          <button class="icon-btn" id="feed-toggle-btn" title="Show Live Feed" onclick="window.toggleFeed()"
+            style="position:relative;">
+            <i class="fa fa-satellite"></i>
+          </button>
+          <button class="icon-btn" id="notif-bell-btn" title="Notifications"
+            onclick="window.navigateTo('notifications')" style="position:relative;">
             <i class="fa fa-bell"></i>
-            <span id="notif-topbar-badge" class="hidden" style="position:absolute;top:2px;right:2px;width:8px;height:8px;border-radius:50%;background:var(--color-danger);"></span>
+            <span id="notif-topbar-badge" class="hidden"
+              style="position:absolute;top:2px;right:2px;width:8px;height:8px;border-radius:50%;background:var(--color-danger);"></span>
           </button>
           <div class="user-info">
             <i class="fa fa-user-astronaut"></i>

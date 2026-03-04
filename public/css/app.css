@@ -791,7 +791,9 @@ select:focus {
 }
 
 .kanban-col {
-  flex: 0 0 200px;
+  flex: 1 1 180px;
+  min-width: 160px;
+  max-width: 340px;
   display: flex;
   flex-direction: column;
   background: var(--color-surface);

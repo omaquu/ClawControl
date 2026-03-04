@@ -250,20 +250,68 @@ function initSSE() {
   sseSource.onerror = () => { setTimeout(initSSE, 3000); };
 }
 
+// Gateway log buffer — last 50 entries visible in the sidebar popover
+const _gatewayLogs = [];
+function addGatewayLog(msg, level = 'info') {
+  const ts = new Date().toLocaleTimeString();
+  _gatewayLogs.unshift({ ts, msg, level });
+  if (_gatewayLogs.length > 50) _gatewayLogs.pop();
+  // Refresh popover if open
+  const pop = document.getElementById('gateway-log-popover');
+  if (pop) renderGatewayPopover(pop);
+}
+
+function renderGatewayPopover(pop) {
+  pop.innerHTML = `
+    <div style="font-size:0.72rem;font-weight:700;color:var(--color-text-muted);margin-bottom:0.5rem;letter-spacing:0.06em;">GATEWAY LOG</div>
+    ${_gatewayLogs.length ? _gatewayLogs.slice(0, 20).map(l => `
+      <div style="display:flex;gap:0.5rem;margin-bottom:0.2rem;line-height:1.4;">
+        <span style="color:var(--color-text-muted);font-size:0.68rem;flex-shrink:0;">${l.ts}</span>
+        <span style="font-size:0.75rem;color:${l.level === 'error' ? 'var(--color-danger)' : l.level === 'success' ? 'var(--color-success)' : 'var(--color-text)'};">${l.msg}</span>
+      </div>`).join('') : '<div style="color:var(--color-text-muted);font-size:0.78rem;">No logs yet</div>'}`;
+}
+
 function initGateway() {
   apiFetch('/gateway/status').then(s => {
     const dot = document.getElementById('gateway-dot');
     const label = document.getElementById('gateway-label');
-    if (s && s.connected) { dot.className = 'status-dot online'; label.textContent = 'Gateway Online'; }
-    else {
+    if (!dot || !label) return;
+    if (s && s.connected) {
+      dot.className = 'status-dot online';
+      label.textContent = 'Gateway Online';
+      addGatewayLog(`✅ Connected to ${s.url || 'gateway'}`, 'success');
+    } else {
       dot.className = 'status-dot offline';
-      const errPart = s?.lastError ? ` (${s.lastError.slice(0, 40)})` : '';
-      const retryPart = s?.reconnectAttempts ? ` #${s.reconnectAttempts}` : '';
-      label.textContent = `Gateway Offline${retryPart}${errPart}`;
-      label.title = s?.lastError || '';
+      const retryPart = s?.reconnectAttempts ? ` (retry #${s.reconnectAttempts})` : '';
+      label.textContent = `Gateway Offline${retryPart}`;
+      if (s?.lastError) {
+        label.title = s.lastError;
+        addGatewayLog(`❌ ${s.lastError}`, 'error');
+      } else {
+        addGatewayLog(`⚠️ Gateway offline${retryPart}`, 'warn');
+      }
     }
-  }).catch(() => { });
+  }).catch(e => {
+    addGatewayLog(`❌ Status fetch failed: ${e.message}`, 'error');
+  });
 }
+
+// Make gateway pill clickable to show log popover
+document.getElementById('gateway-status')?.addEventListener('click', () => {
+  let pop = document.getElementById('gateway-log-popover');
+  if (pop) { pop.remove(); return; }
+  pop = document.createElement('div');
+  pop.id = 'gateway-log-popover';
+  pop.style.cssText = 'position:fixed;left:260px;top:80px;width:340px;max-height:320px;overflow-y:auto;z-index:500;background:var(--color-card);border:1px solid var(--color-border);border-radius:10px;padding:0.75rem 1rem;box-shadow:0 8px 32px rgba(0,0,0,0.4);font-family:var(--font-mono);';
+  renderGatewayPopover(pop);
+  document.body.appendChild(pop);
+  setTimeout(() => document.addEventListener('click', function handler(e) {
+    if (!pop.contains(e.target) && e.target.id !== 'gateway-status' && !document.getElementById('gateway-status')?.contains(e.target)) {
+      pop.remove(); document.removeEventListener('click', handler);
+    }
+  }, { capture: true }), 100);
+});
+
 
 // Notification badge helper
 window.updateNotifBadge = async function () {
@@ -454,14 +502,17 @@ async function navigateTo(page) {
     try {
       const mod = await import(`/js/pages/${page}.js`);
       PAGE_MODULES[page] = mod;
-      mod.init(pageEl);
+      await mod.init(pageEl);
     } catch (e) {
+      console.error(`[Router] Failed to load page "${page}":`, e);
       pageEl.innerHTML = `<div class="empty-state"><i class="fa fa-triangle-exclamation"></i><p>Page "${page}" failed to load.<br><small>${e.message}</small></p></div>`;
     }
   } else {
-    PAGE_MODULES[page].refresh?.(pageEl);
+    await PAGE_MODULES[page].refresh?.(pageEl);
   }
 }
+// Expose for inline onclick attributes in HTML
+window.navigateTo = (page) => navigateTo(page);
 
 // Nav click handler
 document.querySelectorAll('.nav-item').forEach(el => {
@@ -478,12 +529,19 @@ document.getElementById('sidebar-toggle').addEventListener('click', () => {
   document.getElementById('app-shell').classList.toggle('sidebar-collapsed', sidebarCollapsed);
 });
 
-// Live feed toggle
+// Live feed toggle — supports both open and close
 let feedVisible = true;
-document.getElementById('close-feed-btn').addEventListener('click', () => {
-  feedVisible = false;
-  document.getElementById('app-shell').classList.add('feed-hidden');
-});
+function toggleFeed(show) {
+  feedVisible = show !== undefined ? show : !feedVisible;
+  document.getElementById('app-shell').classList.toggle('feed-hidden', !feedVisible);
+  const btn = document.getElementById('feed-toggle-btn');
+  if (btn) {
+    btn.title = feedVisible ? 'Hide Live Feed' : 'Show Live Feed';
+    btn.querySelector('i').className = feedVisible ? 'fa fa-satellite' : 'fa fa-satellite-dish';
+  }
+}
+document.getElementById('close-feed-btn').addEventListener('click', () => toggleFeed(false));
+window.toggleFeed = toggleFeed;
 
 // Logout
 document.getElementById('logout-btn').addEventListener('click', handleLogout);
