@@ -198,8 +198,10 @@ function auditLog(event, detail) {
 // ─── Express App ──────────────────────────────────────────────────────────────
 const app = express();
 
+const allowHttp = process.env.DASHBOARD_ALLOW_HTTP === 'true';
+
 app.use(helmet({
-    contentSecurityPolicy: {
+    contentSecurityPolicy: allowHttp ? false : {
         directives: {
             defaultSrc: ["'self'"],
             scriptSrc: ["'self'", "'unsafe-inline'", "cdnjs.cloudflare.com", "cdn.jsdelivr.net"],
@@ -211,7 +213,8 @@ app.use(helmet({
             workerSrc: ["'self'", "blob:"],
         }
     },
-    hsts: { maxAge: 31536000, includeSubDomains: true }
+    hsts: allowHttp ? false : { maxAge: 31536000, includeSubDomains: true },
+    crossOriginResourcePolicy: false
 }));
 
 
@@ -223,7 +226,6 @@ app.use((req, res, next) => {
     const ip = req.ip || '';
     const isLocal = ip === '127.0.0.1' || ip === '::1' || ip.startsWith('::ffff:127.');
     const isTailscale = /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip);
-    const allowHttp = process.env.DASHBOARD_ALLOW_HTTP === 'true';
     if (!allowHttp && !isLocal && !isTailscale && req.headers['x-forwarded-proto'] !== 'https' && req.protocol !== 'https') {
         return res.redirect(301, 'https://' + req.hostname + req.url);
     }
@@ -1301,15 +1303,37 @@ gatewayClients.on('connection', (ws, req) => {
     const isAuthorized = (sessionId && sessions.has(sessionId)) || (token && MC_API_TOKEN && token === MC_API_TOKEN);
     if (!isAuthorized) { ws.close(4001, 'Unauthorized'); return; }
 
-    // Send immediate approval handshake to prevent agent timeout
-    ws.send(JSON.stringify({
-        type: 'handshake',
-        status: 'approved',
-        message: 'Connected to ClawControl Gateway Proxy'
-    }));
-
+    // Protocol state: wait for agent hello then spoof hello-ok
     ws.on('message', msg => {
-        if (gatewayWs && gatewayWs.readyState === WebSocket.OPEN) gatewayWs.send(msg);
+        try {
+            const str = msg.toString();
+            const json = JSON.parse(str);
+            const msgType = json.type || json.event;
+
+            // Intercept 'hello' or 'connect' to satisfy the agent protocol expectation
+            if (msgType === 'hello' || msgType === 'connect') {
+                const response = {
+                    type: 'res',
+                    payload: {
+                        type: 'hello-ok',
+                        protocol: 3,
+                        policy: { tickIntervalMs: 15000 }
+                    }
+                };
+                ws.send(JSON.stringify(response));
+                console.log(`🤝 [Gateway Proxy] Spoofed hello-ok for agent.`);
+            }
+
+            // Relay to upstream if connected
+            if (gatewayWs && gatewayWs.readyState === WebSocket.OPEN) {
+                gatewayWs.send(msg);
+            }
+        } catch (e) {
+            // Non-JSON or malformed, just relay if possible
+            if (gatewayWs && gatewayWs.readyState === WebSocket.OPEN) {
+                gatewayWs.send(msg);
+            }
+        }
     });
 });
 
@@ -1349,6 +1373,21 @@ function connectGateway() {
             gatewayLastError = null;
             gatewayLastConnectedAt = Date.now();
             console.log(`✅ [Gateway] Connected to ${gwUrl}`);
+
+            // Send outbound identification frame (Handshake)
+            const connectFrame = {
+                type: 'req',
+                id: 'handshake-' + Date.now(),
+                method: 'connect',
+                params: {
+                    role: 'dashboard',
+                    auth: { token: gwToken },
+                    client: { id: 'ClawControl', version: '1.0.0', platform: process.platform }
+                }
+            };
+            gatewayWs.send(JSON.stringify(connectFrame));
+            console.log(`🚀 [Gateway] Sent outbound connect handshake.`);
+
             broadcastEvent({ type: 'GATEWAY_CONNECTED', payload: { url: gwUrl } });
         });
 
@@ -1394,6 +1433,7 @@ initDb().then(() => {
     server.listen(PORT, () => {
         console.log(`🚀 ClawControl listening on http://localhost:${PORT}`);
         console.log(`📁 Workspace: ${WORKSPACE_DIR}`);
+        console.log(`📁 Public Dir: ${path.join(__dirname, 'public')}`);
         console.log(`🗄  Database: ${DB_PATH}`);
         startHealthPoller();
     });
