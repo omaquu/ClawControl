@@ -11,16 +11,17 @@ services:
       - mc_data:/data
       - ${WORKSPACE_DIR:-./workspace}:/workspace
     environment:
+      - NODE_ENV=production
       - PORT=7000
       - DATABASE_PATH=/data/clawcontrol.db
       - WORKSPACE_DIR=/workspace
       - OPENCLAW_DIR=/workspace
-      - OPENCLAW_GATEWAY_URL=${OPENCLAW_GATEWAY_URL:-ws://host.docker.internal:18789}
-      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
+      - OPENCLAW_GATEWAY_URL=${OPENCLAW_GATEWAY_URL:-ws://openclaw:18789}
+      - OPENCLAW_GATEWAY_TOKEN=${SERVICE_PASSWORD_64_GATEWAYTOKEN:-}
       - DASHBOARD_TOKEN=${DASHBOARD_TOKEN:-}
       - MC_API_TOKEN=${MC_API_TOKEN:-}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
-      - DASHBOARD_ALLOW_HTTP=${DASHBOARD_ALLOW_HTTP:-false}
+      - DASHBOARD_ALLOW_HTTP=${DASHBOARD_ALLOW_HTTP:-true}
       - GATEWAY_RETRY_INTERVAL=${GATEWAY_RETRY_INTERVAL:-1000}
     extra_hosts:
       - "host.docker.internal:host-gateway"

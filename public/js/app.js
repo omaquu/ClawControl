@@ -14,7 +14,8 @@ async function apiFetch(url, opts = {}) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(opts.body);
   }
-  const res = await fetch('/api' + url, opts);
+  const fullPath = url.startsWith('auth/') ? '/api' + url : (url.startsWith('http') ? url : 'api' + url); // Fallback logic
+  const res = await fetch(fullPath, opts);
   if (res.status === 401 && !url.includes('/auth/logout')) {
     handleLogout();
     return null;
@@ -35,7 +36,7 @@ window.api = async (path, opts = {}) => {
   if (!opts.headers) opts.headers = {};
   if (currentSession) opts.headers['x-session-id'] = currentSession;
   if (opts.body && typeof opts.body === 'string') opts.headers['Content-Type'] = 'application/json';
-  const fullPath = path.startsWith('/api') ? path : '/api' + path;
+  const fullPath = path.startsWith('api') ? path : 'api' + (path.startsWith('/') ? path : '/' + path);
   const res = await fetch(fullPath, opts);
   if (res.status === 401 && !fullPath.includes('/auth/logout')) {
     handleLogout();
@@ -164,7 +165,7 @@ async function handleLogout() {
 // ─── SSE Live Feed ────────────────────────────────────────────────────────────
 function initSSE() {
   if (sseSource) sseSource.close();
-  const url = `/api/live?sessionId=${currentSession}`;
+  const url = `api/live?sessionId=${currentSession}`;
   sseSource = new EventSource(url);
   sseSource.onmessage = (e) => {
     try {
@@ -441,7 +442,7 @@ async function navigateTo(page) {
 
   if (!PAGE_MODULES[page]) {
     try {
-      const mod = await import(`/js/pages/${page}.js`);
+      const mod = await import(`./pages/${page}.js`);
       PAGE_MODULES[page] = mod;
       await mod.init(pageEl);
     } catch (e) {
