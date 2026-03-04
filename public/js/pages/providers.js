@@ -7,6 +7,10 @@ export async function init(el) {
   await loadProviders(el);
   el.querySelector('#add-provider-btn').addEventListener('click', () => showAddModal());
   el.querySelector('#proxy-test-btn').addEventListener('click', () => testProxy());
+  el.querySelector('#prov-info-toggle').addEventListener('click', () => {
+    const box = el.querySelector('#prov-how-to');
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+  });
   window._providerRefresh = () => loadProviders(el);
 }
 
@@ -20,8 +24,18 @@ function renderPage() {
       <p class="page-sub">Manage AI providers, priorities, and automatic fallback</p>
     </div>
     <div style="display:flex;gap:0.5rem;align-items:center;">
+      <button class="btn btn-ghost" id="prov-info-toggle" title="How to use"><i class="fa fa-circle-question"></i> How it works</button>
       <button class="btn btn-primary" id="add-provider-btn"><i class="fa fa-plus"></i> Add Provider</button>
     </div>
+  </div>
+
+  <div id="prov-how-to" class="info-box" style="display:none;">
+    <strong>How agents use this gateway:</strong><br>
+    • All agents automatically route through your providers in <strong>priority order</strong> (lowest # = first).<br>
+    • Set <strong>Agent Scope</strong> to an agent ID to bind a provider exclusively to that agent, or leave as <code>global</code> for all agents.<br>
+    • Use <strong>Load Balance Mode</strong>: <code>priority</code> = first healthy, <code>round-robin</code> = rotate, <code>manual</code> = use Force button below.<br>
+    • <strong>Force Agent →</strong> overrides the active provider for a specific agent <em>immediately</em> — no restart needed.<br>
+    • The proxy endpoint is <code>POST /api/proxy/chat</code>. Agents should call this instead of provider APIs directly.
   </div>
 
   <div class="card" style="margin-bottom:1rem;padding:1rem 1.25rem;">
@@ -29,7 +43,7 @@ function renderPage() {
       <div><div class="stat-label">PROVIDERS</div><div class="stat-value" id="prov-count">—</div></div>
       <div><div class="stat-label">HEALTHY</div><div class="stat-value" id="prov-healthy" style="color:var(--color-success)">—</div></div>
       <div><div class="stat-label">DOWN</div><div class="stat-value" id="prov-down" style="color:var(--color-danger)">—</div></div>
-      <div style="flex:1;text-align:right;font-size:0.78rem;color:var(--color-text-dim)">
+      <div style="flex:1;text-align:right;font-size:0.78rem;color:var(--color-text-muted)">
         Health checked every 60s &nbsp;•&nbsp; API keys encrypted at rest (AES-256-GCM)
       </div>
     </div>
@@ -38,16 +52,17 @@ function renderPage() {
   <div id="providers-list"></div>
 
   <div class="card" style="margin-top:1rem;">
-    <div class="card-header"><i class="fa fa-route"></i> Proxy Test</div>
+    <div class="card-header" style="padding:0.75rem 1rem;border-bottom:1px solid var(--color-border);font-size:0.85rem;font-weight:600;"><i class="fa fa-route"></i> Proxy Test Console</div>
     <div style="padding:1rem;">
       <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
-        <input class="form-input" id="proxy-test-msg" placeholder="Test message via /api/proxy/chat" style="flex:1;">
+        <input class="form-input" id="proxy-test-msg" placeholder="Send a test message via /api/proxy/chat…" style="flex:1;">
         <button class="btn btn-ghost" id="proxy-test-btn"><i class="fa fa-paper-plane"></i> Send</button>
       </div>
-      <pre id="proxy-test-result" style="background:var(--color-surface);padding:1rem;border-radius:8px;font-size:0.78rem;max-height:200px;overflow:auto;color:var(--color-text-dim);">Response will appear here…</pre>
+      <pre id="proxy-test-result" style="background:var(--color-surface);padding:1rem;border-radius:8px;font-size:0.78rem;max-height:200px;overflow:auto;color:var(--color-text-muted);">Response will appear here…</pre>
     </div>
   </div>`;
 }
+
 
 async function loadProviders(el) {
   const providers = await window.apiFetch('/providers');
@@ -79,14 +94,14 @@ function renderList(el, providers) {
     <table class="data-table">
       <thead><tr>
         <th>#</th><th>Provider</th><th>Type</th><th>Models</th>
-        <th>Scope</th><th>Mode</th><th>Health</th><th>Enabled</th><th></th>
+        <th>Scope</th><th>Mode</th><th>Health</th><th>On</th><th>Actions</th>
       </tr></thead>
       <tbody>
       ${[...providers].sort((a, b) => a.priority - b.priority).map((p, i) => `
         <tr data-id="${p.id}">
           <td style="color:var(--color-text-muted);width:32px;">${i + 1}</td>
           <td><strong>${typeIcon(p.type)} ${p.name}</strong><br>
-            <span style="font-size:0.72rem;color:var(--color-text-muted)">${p.api_key || '(no key)'}</span>
+            <span style="font-size:0.72rem;color:var(--color-text-muted)">${p.base_url || p.type}</span>
           </td>
           <td><span style="font-family:var(--font-mono);font-size:0.82rem">${p.type}</span></td>
           <td style="font-size:0.78rem;color:var(--color-text-muted)">${(p.models || []).slice(0, 2).join(', ') || '—'}${(p.models || []).length > 2 ? ` +${p.models.length - 2}` : ''}</td>
@@ -99,7 +114,8 @@ function renderList(el, providers) {
             </label>
           </td>
           <td style="white-space:nowrap;">
-            <button class="btn btn-sm btn-ghost" onclick="window._provTest('${p.id}')" title="Test"><i class="fa fa-stethoscope"></i></button>
+            <button class="btn btn-sm btn-ghost" onclick="window._provForce('${p.id}')" title="Force agent to use this provider"><i class="fa fa-bolt"></i></button>
+            <button class="btn btn-sm btn-ghost" onclick="window._provTest('${p.id}')" title="Test health"><i class="fa fa-stethoscope"></i></button>
             <button class="btn btn-sm btn-ghost" onclick="window._provEdit('${p.id}')" title="Edit"><i class="fa fa-pen"></i></button>
             <button class="btn btn-sm btn-ghost" style="color:var(--color-danger)" onclick="window._provDel('${p.id}')" title="Delete"><i class="fa fa-trash"></i></button>
           </td>
@@ -107,6 +123,7 @@ function renderList(el, providers) {
       </tbody>
     </table>
   </div>`;
+
 
   window._provToggle = async (id, enabled) => {
     await window.apiFetch(`/providers/${id}`, { method: 'PUT', body: { enabled } });
@@ -129,7 +146,31 @@ function renderList(el, providers) {
     await loadProviders(el);
     window.showToast('Provider deleted', 'success');
   };
+  window._provForce = async (id) => {
+    const agents = await window.apiFetch('/agents') || [];
+    const opts = [{ id: 'global', name: '🌐 All Agents (global)' }, ...agents].map(a =>
+      `<option value="${a.id}">${a.name}</option>`).join('');
+    window.showModal('⚡ Force Agent → Provider', `
+      <p style="color:var(--color-text-muted);font-size:0.85rem;margin-bottom:0.75rem;">
+        Select an agent to immediately route their requests through this provider.<br>
+        No restart required — takes effect on the next request.
+      </p>
+      <label class="form-label">Agent</label>
+      <select class="form-select" id="force-agent-sel">${opts}</select>`, [
+      { label: 'Cancel', cls: 'btn-ghost', onClick: window.closeModal },
+      {
+        label: '⚡ Force Now', cls: 'btn-primary', onClick: async () => {
+          const scope = document.getElementById('force-agent-sel').value;
+          await window.apiFetch(`/providers/${id}`, { method: 'PUT', body: { agent_scope: scope } });
+          window.closeModal();
+          await loadProviders(el);
+          window.showToast(scope === 'global' ? 'Provider set to global' : `Provider forced for agent`, 'success');
+        }
+      }
+    ]);
+  };
 }
+
 
 function providerFormHTML(p = {}) {
   const types = ['anthropic', 'openai', 'google', 'openrouter', 'custom'];
