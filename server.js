@@ -130,8 +130,6 @@ async function initDb() {
 const PORT = parseInt(process.env.DASHBOARD_PORT || '7000');
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || process.cwd();
 const OPENCLAW_DIR = process.env.OPENCLAW_DIR || path.join(process.env.HOME || process.env.USERPROFILE || '', '.openclaw');
-const OPENCLAW_GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789';
-const OPENCLAW_GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || '';
 const MC_API_TOKEN = process.env.MC_API_TOKEN || '';
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 const GATEWAY_RETRY_BASE = parseInt(process.env.GATEWAY_RETRY_INTERVAL || '1000');
@@ -752,13 +750,45 @@ app.get('/api/events', requireAuth, async (req, res) => {
 
 // ─── Gateway Info ─────────────────────────────────────────────────────────────
 app.get('/api/gateway/status', requireAuth, (req, res) => {
+    const creds = loadCreds() || {};
+    const url = creds.gatewayUrl || process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789';
     res.json({
-        url: OPENCLAW_GATEWAY_URL,
+        url,
         connected: gatewayConnected,
         lastError: gatewayLastError,
         lastConnectedAt: gatewayLastConnectedAt,
         reconnectAttempts: gatewayRetryAttempts
     });
+});
+
+app.get('/api/gateway/config', requireAuth, (req, res) => {
+    const creds = loadCreds() || {};
+    res.json({
+        gatewayUrl: creds.gatewayUrl || process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789',
+        gatewayToken: creds.gatewayToken || process.env.OPENCLAW_GATEWAY_TOKEN || ''
+    });
+});
+
+app.post('/api/gateway/config', requireAuth, (req, res) => {
+    const { gatewayUrl, gatewayToken } = req.body;
+    let creds = loadCreds();
+    if (!creds) return res.status(400).json({ error: 'System not initialized. Please register first.' });
+
+    creds.gatewayUrl = gatewayUrl.trim();
+    creds.gatewayToken = gatewayToken.trim();
+    saveCreds(creds);
+    auditLog('gateway_config_updated', { url: creds.gatewayUrl });
+
+    // Trigger immediate reconnect
+    if (gatewayWs) {
+        try { gatewayWs.terminate(); } catch (e) { }
+    } else {
+        if (gatewayRetryTimer) clearTimeout(gatewayRetryTimer);
+        gatewayRetryAttempts = 0;
+        connectGateway();
+    }
+
+    res.json({ ok: true });
 });
 
 // ─── API: System — Network / PM2 / Docker ────────────────────────────────────
@@ -1246,28 +1276,32 @@ gatewayClients.on('connection', (ws, req) => {
 });
 
 function connectGateway() {
-    if (!OPENCLAW_GATEWAY_URL) {
+    const creds = loadCreds() || {};
+    const gwUrl = creds.gatewayUrl || process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789';
+    const gwToken = creds.gatewayToken || process.env.OPENCLAW_GATEWAY_TOKEN || '';
+
+    if (!gwUrl) {
         console.log('⚠️  [Gateway] OPENCLAW_GATEWAY_URL not set — gateway disabled.');
         return;
     }
-    if (!OPENCLAW_GATEWAY_TOKEN) {
+    if (!gwToken) {
         console.log('⚠️  [Gateway] OPENCLAW_GATEWAY_TOKEN not set — gateway disabled.');
         return;
     }
 
     // Validate scheme
-    if (!OPENCLAW_GATEWAY_URL.startsWith('ws://') && !OPENCLAW_GATEWAY_URL.startsWith('wss://')) {
-        console.error(`❌ [Gateway] Invalid URL scheme: "${OPENCLAW_GATEWAY_URL}"`);
+    if (!gwUrl.startsWith('ws://') && !gwUrl.startsWith('wss://')) {
+        console.error(`❌ [Gateway] Invalid URL scheme: "${gwUrl}"`);
         console.error('   ℹ️  OPENCLAW_GATEWAY_URL must start with ws:// or wss://');
         console.error('   ℹ️  Example: ws://host.docker.internal:18789');
         return;
     }
 
-    console.log(`🔌 [Gateway] Trying to connect to ${OPENCLAW_GATEWAY_URL} (attempt ${gatewayRetryAttempts + 1})...`);
+    console.log(`🔌 [Gateway] Trying to connect to ${gwUrl} (attempt ${gatewayRetryAttempts + 1})...`);
 
     try {
-        gatewayWs = new WebSocket(OPENCLAW_GATEWAY_URL, {
-            headers: { Authorization: `Bearer ${OPENCLAW_GATEWAY_TOKEN}` },
+        gatewayWs = new WebSocket(gwUrl, {
+            headers: { Authorization: `Bearer ${gwToken}` },
             rejectUnauthorized: false // Allow self-signed certs (Tailscale)
         });
 
@@ -1276,8 +1310,8 @@ function connectGateway() {
             gatewayRetryAttempts = 0;
             gatewayLastError = null;
             gatewayLastConnectedAt = Date.now();
-            console.log(`✅ [Gateway] Connected to ${OPENCLAW_GATEWAY_URL}`);
-            broadcastEvent({ type: 'GATEWAY_CONNECTED', payload: { url: OPENCLAW_GATEWAY_URL } });
+            console.log(`✅ [Gateway] Connected to ${gwUrl}`);
+            broadcastEvent({ type: 'GATEWAY_CONNECTED', payload: { url: gwUrl } });
         });
 
         gatewayWs.on('message', (data) => {

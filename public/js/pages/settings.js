@@ -72,12 +72,18 @@ function buildLayout() {
       </div>
       <!-- Gateway -->
       <div class="card">
-        <div class="card-title" style="margin-bottom:0.75rem;"><i class="fa fa-network-wired"></i> Gateway Config</div>
+        <div class="card-title" style="margin-bottom:0.75rem;"><i class="fa fa-network-wired"></i> Server Gateway Config</div>
         <div id="gateway-settings-status" style="font-size:0.8rem;color:var(--color-text-muted);margin-bottom:0.5rem;">Checking…</div>
-        <div class="form-group"><label class="form-label">Client Override URL (localStorage)</label>
-          <input type="text" class="form-input font-mono" id="gw-override-url" value="${localStorage.getItem('mc_gateway_override') || ''}" placeholder="ws://localhost:8080"></div>
+        <div class="form-group">
+          <label class="form-label">Gateway WebSocket URL</label>
+          <input type="text" class="form-input font-mono" id="gw-server-url" placeholder="wss://my-gateway.tailnet.ts.net">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Gateway Token</label>
+          <input type="password" class="form-input font-mono" id="gw-server-token" placeholder="Your Gateway Token">
+        </div>
         <div style="display:flex;gap:0.5rem;">
-          <button class="btn btn-secondary btn-sm flex-1" data-action="save-gw-override">Save Override</button>
+          <button class="btn btn-secondary btn-sm flex-1" data-action="save-gw-config">Save & Reconnect</button>
           <button class="btn btn-secondary btn-sm flex-1" data-action="restart-gateway"><i class="fa fa-rotate"></i> Restart</button>
         </div>
       </div>
@@ -165,7 +171,15 @@ async function loadAuthSettings() {
     }
   }
   const gwData = await window.apiFetch('/gateway/status').catch(() => null);
-  if (gw) gw.innerHTML = gwData ? `<span class="badge badge-${gwData.connected ? 'active' : 'standby'}">${gwData.connected ? 'Connected' : 'Disconnected'}</span> <span class="text-muted">${escHtml(gwData.url)}</span>` : 'Unknown';
+  if (gw) gw.innerHTML = gwData ? `<span class="badge badge-${gwData.connected ? 'active' : 'error'}">${gwData.connected ? 'Connected' : 'Disconnected'}</span> <span class="text-muted" style="margin-left:4px">${escHtml(gwData.url)}</span>` : 'Unknown';
+
+  const gwConfig = await window.apiFetch('/gateway/config').catch(() => null);
+  if (gwConfig) {
+    document.getElementById('gw-server-url').value = gwConfig.gatewayUrl || '';
+    document.getElementById('gw-server-token').value = gwConfig.gatewayToken ? '********' : '';
+    // Store the real token in a data attribute, use ******** for display if set
+    document.getElementById('gw-server-token').dataset.realToken = gwConfig.gatewayToken || '';
+  }
 }
 
 function bindEvents(el) {
@@ -219,11 +233,17 @@ function bindEvents(el) {
     if (action === 'restart-gateway') window.apiFetch('/action/restart-gateway', { method: 'POST' }).then(() => window.showToast('Gateway restarted', 'info'));
     if (action === 'setup-mfa') setupMfa();
     if (action === 'disable-mfa') disableMfa();
-    if (action === 'save-gw-override') {
-      const url = document.getElementById('gw-override-url').value.trim();
-      if (url) localStorage.setItem('mc_gateway_override', url);
-      else localStorage.removeItem('mc_gateway_override');
-      window.showToast('Gateway override saved locally', 'success');
+    if (action === 'save-gw-config') {
+      const url = document.getElementById('gw-server-url').value.trim();
+      let token = document.getElementById('gw-server-token').value.trim();
+      if (token === '********') token = document.getElementById('gw-server-token').dataset.realToken;
+
+      window.apiFetch('/gateway/config', { method: 'POST', body: { gatewayUrl: url, gatewayToken: token } })
+        .then(() => {
+          window.showToast('Gateway settings saved. Reconnecting...', 'success');
+          setTimeout(loadAuthSettings, 1000);
+        })
+        .catch(e => window.showToast(e.message, 'error'));
     }
   });
 }

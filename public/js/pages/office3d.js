@@ -65,10 +65,13 @@ async function loadThree() {
 
 // ── Zone definitions ──────────────────────────────────────────────────────────
 const ZONES = {
-    coding: { label: '💻 Coding', color: '#6366f1', cx: -6, cz: -6, roles: ['developer', 'coder', 'engineer', 'code'] },
+    coding: { label: '💻 Coding', color: '#6366f1', cx: -6, cz: -6, roles: ['developer', 'coder', 'engineer', 'code', 'programmer'] },
+    debugger: { label: '🐞 Debugger', color: '#84cc16', cx: -12, cz: 0, roles: ['qa', 'tester', 'debug', 'test'] },
     art: { label: '🎨 Art Studio', color: '#ec4899', cx: 6, cz: -6, roles: ['artist', 'creative', 'design', 'art'] },
     explorer: { label: '🔭 Explorer', color: '#06b6d4', cx: 6, cz: 6, roles: ['researcher', 'search', 'scout', 'explore'] },
-    security: { label: '🔒 Security', color: '#f59e0b', cx: -6, cz: 6, roles: ['security', 'holvi', 'guard', 'audit'] },
+    economist: { label: '📈 Economist', color: '#14b8a6', cx: 12, cz: 0, roles: ['finance', 'math', 'economist', 'analyst', 'data'] },
+    writer: { label: '✍️ Writer', color: '#fb923c', cx: 12, cz: -8, roles: ['writer', 'author', 'content', 'script', 'copy'] },
+    security: { label: '🔒 Security', color: '#f59e0b', cx: -6, cz: 6, roles: ['security', 'holvi', 'guard', 'audit', 'maintenance'] },
     orchestrator: { label: '📋 Management', color: '#8b5cf6', cx: 0, cz: -7, roles: ['orchestrator', 'manager', 'lead', 'boss'] },
     lounge: { label: '☕ Lounge', color: '#10b981', cx: 0, cz: 0, roles: [] }, // idle agents
     bedroom: { label: '😴 Bedroom', color: '#4b5563', cx: 0, cz: 9, roles: [] }, // offline agents
@@ -206,9 +209,9 @@ function buildScene(agents, el) {
         return mesh;
     }
 
-    function cylinder(scene, rt, rb, h, px, py, pz, color, seg = 8) {
+    function cylinder(scene, rt, rb, h, px, py, pz, color, seg = 8, rx = 0, ry = 0, rz = 0) {
         const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), new M({ color, roughness: 0.6 }));
-        m.position.set(px, py, pz); m.castShadow = true;
+        m.position.set(px, py, pz); m.rotation.set(rx, ry, rz); m.castShadow = true;
         scene.add(m);
     }
 
@@ -331,12 +334,75 @@ function buildScene(agents, el) {
         box(scene, 0.6, 0.06, 0.6, cx + 0.3, 0.54, cz + 0.7, '#1a1a2a');
         box(scene, 0.58, 0.65, 0.06, cx + 0.3, 0.88, cz + 0.98, '#1a1a2a');
         cylinder(scene, 0.04, 0.04, 0.5, cx + 0.3, 0.27, cz + 0.7, '#111122');
-        // Lock icon (symbolic)
-        cylinder(scene, 0.15, 0.15, 0.04, cx - 1.8, 2.4, cz - 0.9, '#f59e0b', 16);
-        box(scene, 0.18, 0.15, 0.04, cx - 1.8, 2.24, cz - 0.87, '#1a1a2e');
-        // Security camera on wall
-        box(scene, 0.22, 0.1, 0.12, cx - 2.7, 3.0, cz - 1.2, '#1a1a2e');
-        box(scene, 0.08, 0.08, 0.2, cx - 2.59, 2.98, cz - 1.2, '#1a1a2e');
+        // Lock icon (symbolic) attached to rack
+        cylinder(scene, 0.15, 0.15, 0.04, cx - 1.0, 2.0, cz - 0.45, '#f59e0b', 16, 0, Math.PI / 2, 0);
+        box(scene, 0.18, 0.15, 0.04, cx - 1.0, 1.84, cz - 0.45, '#1a1a2e', 0, Math.PI / 2, 0);
+        // Security camera on rack
+        box(scene, 0.22, 0.1, 0.12, cx - 1.0, 2.7, cz - 0.7, '#1a1a2e', 0, Math.PI / 4, 0);
+        box(scene, 0.08, 0.08, 0.2, cx - 0.9, 2.68, cz - 0.6, '#1a1a2e', 0, Math.PI / 4, 0);
+    }
+
+    // ─── DEBUGGER ZONE (cx:-12 cz:0) ──────────────────────────────────────────
+    {
+        const cx = -12, cz = 0;
+        // Workbench for testing
+        box(scene, 2.6, 0.06, 1.0, cx + 0.3, 0.85, cz, '#2a2a2a'); // table
+        [[-1.2, -0.4], [1.2, -0.4], [-1.2, 0.4], [1.2, 0.4]].forEach(([x, z]) =>
+            box(scene, 0.06, 0.85, 0.06, cx + 0.3 + x, 0.425, cz + z, '#444'));
+        // Oscilloscope / test equipment
+        box(scene, 0.9, 0.6, 0.5, cx - 0.5, 1.15, cz - 0.2, '#1a1e1a');
+        box(scene, 0.4, 0.3, 0.02, cx - 0.6, 1.2, cz + 0.06, '#0f1a0f', 0, 0, 0, '#84cc16'); // green scope screen
+        // Wires and boards
+        box(scene, 0.4, 0.02, 0.3, cx + 0.4, 0.89, cz + 0.1, '#155e3a'); // PCB
+        ['#ef4444', '#3b82f6'].forEach((c, i) =>
+            cylinder(scene, 0.01, 0.01, 0.6, cx + 0.2 + i * 0.1, 0.9, cz + 0.2, c, 4, Math.PI / 2, 0, 0)); // wires
+        // Tool rack
+        box(scene, 0.04, 1.5, 1.0, cx + 1.6, 1.2, cz, '#333');
+        for (let i = 0; i < 4; i++) box(scene, 0.02, 0.2, 0.02, cx + 1.57, 1.4 + (i % 2) * 0.3, cz - 0.3 + i * 0.2, '#555', 0, 0, 0.2);
+    }
+
+    // ─── ECONOMIST ZONE (cx:12 cz:0) ──────────────────────────────────────────
+    {
+        const cx = 12, cz = 0;
+        // Massive glass desk
+        box(scene, 2.0, 0.04, 1.2, cx - 0.5, 0.8, cz, '#e0f2fe').material.transparent = true;
+        box(scene, 2.0, 0.04, 1.2, cx - 0.5, 0.8, cz, '#e0f2fe').material.opacity = 0.5;
+        [[-0.9, -0.5], [0.9, -0.5], [-0.9, 0.5], [0.9, 0.5]].forEach(([x, z]) =>
+            cylinder(scene, 0.03, 0.03, 0.8, cx - 0.5 + x, 0.4, cz + z, '#a1a1aa'));
+        // 4 monitors setup for trading/charts
+        [[-0.6, 0, 0], [0.6, 0, 0], [-0.4, 0.4, 0], [0.4, 0.4, 0]].forEach(([x, y, roty]) => {
+            box(scene, 0.6, 0.35, 0.03, cx - 0.5 + x, 1.1 + y, cz - 0.4, '#1f2937', 0, (x < 0 ? 0.2 : (x > 0 ? -0.2 : 0)), 0, '#14b8a6');
+            box(scene, 0.5, 0.25, 0.03, cx - 0.5 + x, 1.1 + y, cz - 0.38, '#1e293b');
+        });
+        // Briefcase on floor
+        box(scene, 0.6, 0.4, 0.15, cx - 1.2, 0.2, cz + 0.6, '#451a03');
+        // Leather chair
+        box(scene, 0.65, 0.1, 0.65, cx - 0.5, 0.5, cz + 0.7, '#78350f');
+        box(scene, 0.6, 0.8, 0.1, cx - 0.5, 0.9, cz + 1.0, '#78350f');
+        cylinder(scene, 0.05, 0.05, 0.45, cx - 0.5, 0.25, cz + 0.7, '#52525b');
+    }
+
+    // ─── WRITER ZONE (cx:12 cz:-8) ────────────────────────────────────────────
+    {
+        const cx = 12, cz = -8;
+        // Antique wooden desk
+        box(scene, 1.8, 0.08, 0.9, cx - 0.5, 0.78, cz, '#451a03');
+        [[-0.8, -0.35], [0.8, -0.35], [-0.8, 0.35], [0.8, 0.35]].forEach(([x, z]) =>
+            box(scene, 0.08, 0.78, 0.08, cx - 0.5 + x, 0.39, cz + z, '#451a03'));
+        // Typewriter (retro)
+        box(scene, 0.5, 0.15, 0.4, cx - 0.5, 0.85, cz + 0.1, '#1e293b');
+        cylinder(scene, 0.04, 0.04, 0.6, cx - 0.5, 0.9, cz - 0.05, '#cbd5e1', 8, 0, 0, Math.PI / 2); // platen
+        // Paper in typewriter
+        box(scene, 0.4, 0.5, 0.01, cx - 0.5, 1.05, cz - 0.08, '#f8fafc', -0.2, 0, 0);
+        // Stacks of paper/manuscripts
+        for (let i = 0; i < 3; i++) box(scene, 0.3, 0.15, 0.4, cx - 1.0, 0.82 + i * 0.02, cz - 0.2, '#f8fafc', 0, 0.1 * i, 0);
+        // Desk lamp
+        cylinder(scene, 0.15, 0.15, 0.05, cx + 0.2, 0.82, cz - 0.25, '#ca8a04'); // base
+        box(scene, 0.02, 0.4, 0.02, cx + 0.2, 1.0, cz - 0.25, '#ca8a04', 0.3, 0, 0); // arm
+        cylinder(scene, 0.08, 0.15, 0.15, cx + 0.2, 1.15, cz - 0.15, '#ca8a04', 12, -0.5); // shade
+        // Trash bin (overflowing)
+        cylinder(scene, 0.2, 0.15, 0.4, cx + 0.2, 0.2, cz + 0.6, '#334155', 12);
+        box(scene, 0.1, 0.1, 0.1, cx + 0.2, 0.45, cz + 0.6, '#f8fafc', 0.2, 0.4, 0.1); // crumpled paper
     }
 
     // ─── MANAGEMENT / ORCHESTRATOR CORNER (cx:0 cz:-7) ─────────────────────
@@ -349,7 +415,7 @@ function buildScene(agents, el) {
         cylinder(scene, 0.03, 0.03, 1.8, cx - 1.3, 0.9, cz - 1.2, '#1a1a2e');
         cylinder(scene, 0.03, 0.03, 1.8, cx + 1.3, 0.9, cz - 1.2, '#1a1a2e');
         box(scene, 0.8, 0.04, 0.04, cx - 1.3, 0.04, cz - 1.2, '#1a1a2e');
-        box(scene, 0.8, 0.04, 0.04, cx + 1.3, 0.04, cz - 1.2, '#1a1a2e');
+        box(scene, 0.8, 0.04, 0.04, cx + 1.3, 0.04, cz + 1.2, '#1a1a2e');
         // Markers and eraser tray
         box(scene, 2.8, 0.04, 0.1, cx, 0.7, cz - 1.15, '#2a2a3a');
         // Marker
@@ -393,8 +459,8 @@ function buildScene(agents, el) {
             new THREE.MeshStandardMaterial({ color: '#1a6a1a', roughness: 0.9, emissive: '#10b981', emissiveIntensity: 0.1 })
         );
         plant.position.set(1.5, 0.55, -1.5); scene.add(plant);
-        // TV / display on wall
-        box(scene, 2.2, 1.2, 0.06, 0, 2.0, -0.0, '#050510', 0, 0, 0, '#06b6d4');
+        // TV / display on wall - pushed further back
+        box(scene, 2.2, 1.2, 0.06, 0, 2.0, -2.5, '#050510', 0, 0, 0, '#06b6d4');
     }
 
     // ─── BEDROOM (cx:0 cz:9) ─────────────────────────────────────────────────
@@ -417,15 +483,7 @@ function buildScene(agents, el) {
         // Lamps
         cylinder(scene, 0.08, 0.04, 0.35, cx - 1.35, 0.87, cz - 0.5, '#f0e6c8', 12);
         cylinder(scene, 0.08, 0.04, 0.35, cx + 1.35, 0.87, cz - 0.5, '#f0e6c8', 12);
-        // Stars on ceiling (small emissive spheres)
-        for (let i = 0; i < 12; i++) {
-            const star = new THREE.Mesh(
-                new THREE.SphereGeometry(0.03, 6, 6),
-                new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#ffffff', emissiveIntensity: 1 })
-            );
-            star.position.set(cx + (Math.random() - 0.5) * 5, 5.5, cz + (Math.random() - 0.5) * 3);
-            scene.add(star);
-        }
+        // Stars removed per request.
     }
 
     // ── Place agents ───────────────────────────────────────────────────────────
