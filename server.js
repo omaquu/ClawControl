@@ -158,6 +158,7 @@ function saveCreds(c) {
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 const sessions = new Map(); // sessionId → { createdAt }
+const gatewayUsage = new Map(); // agentId → { model, lastUsed }
 const loginAttempts = new Map(); // ip → { count, lockedUntil }
 
 function hashPassword(pw, salt) {
@@ -1096,12 +1097,38 @@ app.post('/api/proxy/chat', requireAuth, async (req, res) => {
             const response = await proxyToProvider(p, apiKey, messages, model);
             res.setHeader('X-Provider-Used', p.name);
             res.setHeader('X-Provider-Id', p.id);
+
+            // Track usage
+            if (agentId) {
+                const models = JSON.parse(p.models || '[]');
+                const actualModel = model || models[0] || 'unknown';
+                gatewayUsage.set(agentId, {
+                    model: actualModel,
+                    provider: p.name,
+                    lastUsed: Date.now()
+                });
+            }
+
             return res.json(response);
         } catch (err) {
             console.warn(`⚠️  [Proxy] Provider "${p.name}" failed: ${err.message} — trying next...`);
         }
     }
     res.status(503).json({ error: 'All providers failed' });
+});
+
+app.get('/api/gateway/stats', requireAuth, (req, res) => {
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const host = req.get('host');
+    const stats = {
+        connectedAgents: gatewayClients.clients.size,
+        usage: Object.fromEntries(gatewayUsage),
+        masterToken: MC_API_TOKEN ? (MC_API_TOKEN.substring(0, 4) + '...' + MC_API_TOKEN.substring(MC_API_TOKEN.length - 4)) : 'None',
+        fullMasterToken: MC_API_TOKEN,
+        apiUrl: `${protocol}://${host}/api/proxy/chat`,
+        wsUrl: `${protocol === 'https' ? 'wss' : 'ws'}://${host}/ws/gateway`
+    };
+    res.json(stats);
 });
 
 // Helper: ping a provider to check health
@@ -1273,6 +1300,14 @@ gatewayClients.on('connection', (ws, req) => {
     const token = url.searchParams.get('token') || req.headers['authorization']?.replace('Bearer ', '');
     const isAuthorized = (sessionId && sessions.has(sessionId)) || (token && MC_API_TOKEN && token === MC_API_TOKEN);
     if (!isAuthorized) { ws.close(4001, 'Unauthorized'); return; }
+
+    // Send immediate approval handshake to prevent agent timeout
+    ws.send(JSON.stringify({
+        type: 'handshake',
+        status: 'approved',
+        message: 'Connected to ClawControl Gateway Proxy'
+    }));
+
     ws.on('message', msg => {
         if (gatewayWs && gatewayWs.readyState === WebSocket.OPEN) gatewayWs.send(msg);
     });

@@ -5,16 +5,29 @@ export async function init(el) {
   _providerPage = { el };
   el.innerHTML = renderPage();
   await loadProviders(el);
+  await loadGatewayStats(el);
   el.querySelector('#add-provider-btn').addEventListener('click', () => showAddModal());
   el.querySelector('#proxy-test-btn').addEventListener('click', () => testProxy());
   el.querySelector('#prov-info-toggle').addEventListener('click', () => {
     const box = el.querySelector('#prov-how-to');
     box.style.display = box.style.display === 'none' ? 'block' : 'none';
   });
-  window._providerRefresh = () => loadProviders(el);
+  window._providerRefresh = () => { loadProviders(el); loadGatewayStats(el); };
+
+  // Auto-refresh stats while on the page
+  const poll = setInterval(() => {
+    if (document.getElementById('gateway-stats')) {
+      loadGatewayStats(el);
+    } else {
+      clearInterval(poll);
+    }
+  }, 10000);
 }
 
-export async function refresh(el) { await loadProviders(el); }
+export async function refresh(el) {
+  await loadProviders(el);
+  await loadGatewayStats(el);
+}
 
 function renderPage() {
   return `
@@ -38,16 +51,7 @@ function renderPage() {
     • The proxy endpoint is <code>POST /api/proxy/chat</code>. Agents should call this instead of provider APIs directly.
   </div>
 
-  <div class="card" style="margin-bottom:1rem;padding:1rem 1.25rem;">
-    <div style="display:flex;gap:1.5rem;align-items:center;flex-wrap:wrap;">
-      <div><div class="stat-label">PROVIDERS</div><div class="stat-value" id="prov-count">—</div></div>
-      <div><div class="stat-label">HEALTHY</div><div class="stat-value" id="prov-healthy" style="color:var(--color-success)">—</div></div>
-      <div><div class="stat-label">DOWN</div><div class="stat-value" id="prov-down" style="color:var(--color-danger)">—</div></div>
-      <div style="flex:1;text-align:right;font-size:0.78rem;color:var(--color-text-muted)">
-        Health checked every 60s &nbsp;•&nbsp; API keys encrypted at rest (AES-256-GCM)
-      </div>
-    </div>
-  </div>
+  <div id="gateway-stats"></div>
 
   <div id="providers-list"></div>
 
@@ -68,9 +72,73 @@ async function loadProviders(el) {
   const providers = await window.apiFetch('/providers');
   if (!providers) return;
   renderList(el, providers);
-  el.querySelector('#prov-count').textContent = providers.length;
-  el.querySelector('#prov-healthy').textContent = providers.filter(p => p.health === 'healthy').length;
-  el.querySelector('#prov-down').textContent = providers.filter(p => p.health === 'down').length;
+}
+
+async function loadGatewayStats(el) {
+  const stats = await window.apiFetch('/gateway/stats');
+  if (!stats) return;
+
+  const statsEl = el.querySelector('#gateway-stats');
+  const usageKeys = Object.keys(stats.usage);
+  const isEnabled = stats.fullMasterToken && stats.fullMasterToken.length > 0;
+
+  statsEl.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem;">
+      <div class="card" style="padding:1.25rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+            <h3 style="font-size:0.9rem;display:flex;align-items:center;gap:0.5rem;"><i class="fa fa-server" style="color:var(--color-accent)"></i> Dashboard API Gateway</h3>
+            <span style="font-size:0.72rem;padding:2px 8px;border-radius:9999px;background:var(--color-${isEnabled ? 'success' : 'danger'}20);color:var(--color-${isEnabled ? 'success' : 'danger'});border:1px solid var(--color-${isEnabled ? 'success' : 'danger'}40)">
+              ${isEnabled ? '● Active' : '● Disabled'}
+            </span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:0.75rem;">
+            <div>
+              <div class="stat-label">MASTER API TOKEN</div>
+              <div style="display:flex;gap:0.5rem;align-items:center;">
+                <code id="master-token" style="background:var(--color-surface);padding:4px 8px;border-radius:4px;flex:1;">${stats.masterToken}</code>
+                <button class="btn btn-sm btn-ghost" onclick="window._tokenToggle('${stats.fullMasterToken}')" title="Show/Hide"><i class="fa fa-eye"></i></button>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+              <div><div class="stat-label">API ENDPOINT</div><code style="font-size:0.7rem;">${stats.apiUrl}</code></div>
+              <div><div class="stat-label">WS ENDPOINT</div><code style="font-size:0.7rem;">${stats.wsUrl}</code></div>
+            </div>
+          </div>
+      </div>
+
+      <div class="card" style="padding:1.25rem;">
+        <h3 style="font-size:0.9rem;margin-bottom:1rem;display:flex;align-items:center;gap:0.5rem;"><i class="fa fa-users-viewfinder" style="color:var(--color-success)"></i> Live Agent Usage</h3>
+        <div style="display:flex;gap:1.5rem;align-items:center;">
+          <div><div class="stat-label">CONNECTED AGENTS</div><div class="stat-value" style="font-size:1.5rem;">${stats.connectedAgents}</div></div>
+          <div style="flex:1;">
+            ${usageKeys.length === 0 ? '<p style="font-size:0.8rem;color:var(--color-text-muted)">No recent activity tracked through proxy.</p>' : `
+            <table style="width:100%;font-size:0.75rem;border-collapse:collapse;">
+              <thead><tr style="text-align:left;color:var(--color-text-muted);border-bottom:1px solid var(--color-border)"><th>Agent</th><th>Last Model Used</th><th>Provider</th></tr></thead>
+              <tbody>
+                ${usageKeys.map(id => {
+    const u = stats.usage[id];
+    return `<tr style="border-bottom:1px solid var(--color-border)20">
+                    <td style="padding:4px 0;"><strong>${id}</strong></td>
+                    <td>${u.model}</td>
+                    <td><span style="color:var(--color-text-muted)">${u.provider}</span></td>
+                  </tr>`;
+  }).join('')}
+              </tbody>
+            </table>`}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  window._tokenToggle = (full) => {
+    const el = document.getElementById('master-token');
+    if (el.textContent.includes('...')) {
+      el.textContent = full;
+    } else {
+      el.textContent = full.substring(0, 4) + '...' + full.substring(full.length - 4);
+    }
+  };
 }
 
 function typeIcon(type) {
