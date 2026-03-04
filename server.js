@@ -1321,7 +1321,11 @@ function connectGateway() {
 
         gatewayWs.on('close', (code, reason) => {
             gatewayConnected = false;
-            const reasonStr = reason ? reason.toString() : 'no reason given';
+            let reasonStr = reason ? reason.toString() : '';
+            if (!reasonStr) {
+                const standardReasons = { 1000: 'Normal Closure (Server hung up cleanly, check token/auth on remote)', 1001: 'Going Away (Server shutting down)', 1006: 'Abnormal Closure (Connection dropped/timeout)', 1011: 'Internal Server Error' };
+                reasonStr = standardReasons[code] || 'No reason provided';
+            }
             const delay = Math.min(GATEWAY_RETRY_BASE * Math.pow(2, gatewayRetryAttempts), 30000);
             gatewayRetryAttempts++;
             console.log(`🔌 [Gateway] Disconnected (code ${code}: ${reasonStr}). Reconnecting in ${delay}ms...`);

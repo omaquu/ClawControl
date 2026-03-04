@@ -176,9 +176,7 @@ async function loadAuthSettings() {
   const gwConfig = await window.apiFetch('/gateway/config').catch(() => null);
   if (gwConfig) {
     document.getElementById('gw-server-url').value = gwConfig.gatewayUrl || '';
-    document.getElementById('gw-server-token').value = gwConfig.gatewayToken ? '********' : '';
-    // Store the real token in a data attribute, use ******** for display if set
-    document.getElementById('gw-server-token').dataset.realToken = gwConfig.gatewayToken || '';
+    document.getElementById('gw-server-token').value = gwConfig.gatewayToken || '';
   }
 }
 
@@ -235,8 +233,7 @@ function bindEvents(el) {
     if (action === 'disable-mfa') disableMfa();
     if (action === 'save-gw-config') {
       const url = document.getElementById('gw-server-url').value.trim();
-      let token = document.getElementById('gw-server-token').value.trim();
-      if (token === '********') token = document.getElementById('gw-server-token').dataset.realToken;
+      const token = document.getElementById('gw-server-token').value.trim();
 
       window.apiFetch('/gateway/config', { method: 'POST', body: { gatewayUrl: url, gatewayToken: token } })
         .then(() => {
