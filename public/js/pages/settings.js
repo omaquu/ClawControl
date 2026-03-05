@@ -229,8 +229,9 @@ function bindEvents(el) {
     if (action === 'change-password') changePassword();
     if (action === 'copy-token') navigator.clipboard.writeText(document.getElementById('api-token-display').value).then(() => window.showToast('Copied!', 'success'));
     if (action === 'nuke-data') nukeData();
-    if (action === 'restart-gateway') window.apiFetch('/action/restart-gateway', { method: 'POST' }).then(() => window.showToast('Gateway restarted', 'info'));
+    if (action === 'restart-gateway') window.apiFetch('/api/action/restart-gateway', { method: 'POST' }).then(() => window.showToast('Gateway restarted', 'info'));
     if (action === 'disconnect-gateway') window.apiFetch('/api/gateway/disconnect', { method: 'POST' }).then(() => window.showToast('Gateway disconnected', 'info'));
+    if (action === 'antigravity-oauth') startAntigravityOAuth();
     if (action === 'setup-mfa') setupMfa();
     if (action === 'disable-mfa') disableMfa();
     if (action === 'save-gw-config') {
@@ -320,5 +321,4 @@ async function disableMfa() {
     window.showToast('TOTP disabled', 'info'); loadAuthSettings();
   } catch (e) { window.showToast(e.message, 'error'); }
 }
-
 function escHtml(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }

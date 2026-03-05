@@ -6,8 +6,10 @@ export async function init(el) {
   el.innerHTML = renderPage();
   await loadProviders(el);
   await loadGatewayStats(el);
+  await loadAntigravityStatus();
   el.querySelector('#add-provider-btn').addEventListener('click', () => showAddModal());
   el.querySelector('#proxy-test-btn').addEventListener('click', () => testProxy());
+  el.querySelector('#antigravity-btn')?.addEventListener('click', () => startAntigravityOAuth());
   el.querySelector('#prov-info-toggle').addEventListener('click', () => {
     const box = el.querySelector('#prov-how-to');
     box.style.display = box.style.display === 'none' ? 'block' : 'none';
@@ -54,6 +56,20 @@ function renderPage() {
   <div id="gateway-stats"></div>
 
   <div id="providers-list"></div>
+
+  <div class="card" style="margin-top:1rem;">
+    <div class="card-header" style="padding:0.75rem 1rem;border-bottom:1px solid var(--color-border);font-size:0.85rem;font-weight:600;display:flex;align-items:center;gap:0.5rem;">
+      <i class="fa fa-key"></i> Google Antigravity
+      <span style="flex:1;"></span>
+      <span id="antigravity-status" style="font-size:0.78rem;font-weight:400;color:var(--color-text-muted);">Checking…</span>
+    </div>
+    <div style="padding:1rem;">
+      <div style="font-size:0.78rem;color:var(--color-text-muted);margin-bottom:0.75rem;">
+        Authenticate with Google Cloud Code Assist to unlock <code>google-antigravity/claude-opus-4-6-thinking</code> and other Antigravity models in OpenClaw.
+      </div>
+      <button class="btn btn-primary btn-sm" id="antigravity-btn"><i class="fa fa-right-to-bracket"></i> Sign in with Google</button>
+    </div>
+  </div>
 
   <div class="card" style="margin-top:1rem;">
     <div class="card-header" style="padding:0.75rem 1rem;border-bottom:1px solid var(--color-border);font-size:0.85rem;font-weight:600;"><i class="fa fa-route"></i> Proxy Test Console</div>
@@ -327,3 +343,36 @@ async function testProxy() {
   }
   btn.disabled = false;
 }
+
+async function startAntigravityOAuth() {
+  const statusEl = document.getElementById('antigravity-status');
+  if (statusEl) statusEl.textContent = 'Starting OAuth…';
+  try {
+    const { authUrl } = await window.apiFetch('/api/oauth/antigravity/start', { method: 'POST' });
+    const popup = window.open(authUrl, 'antigravity-oauth', 'width=600,height=700,scrollbars=yes');
+    if (!popup) { window.showToast('Allow popups for OAuth to work', 'warning'); return; }
+    const handleMsg = (e) => {
+      if (e.data?.type !== 'antigravity-oauth-ok') return;
+      window.removeEventListener('message', handleMsg);
+      const { email, projectId } = e.data;
+      if (statusEl) statusEl.innerHTML = `<span style="color:var(--color-success);">✅ ${escHtml(email)} (${escHtml(projectId)})</span>`;
+      window.showToast(`Antigravity authenticated as ${email}`, 'success');
+    };
+    window.addEventListener('message', handleMsg);
+  } catch (e) { window.showToast('OAuth failed: ' + e.message, 'error'); }
+}
+
+async function loadAntigravityStatus() {
+  const statusEl = document.getElementById('antigravity-status');
+  if (!statusEl) return;
+  try {
+    const data = await window.apiFetch('/api/oauth/antigravity/status');
+    if (data.connected) {
+      statusEl.innerHTML = `<span style="color:var(--color-success);">✅ ${escHtml(data.email || '?')} (${escHtml(data.projectId || '?')})</span>`;
+    } else {
+      statusEl.textContent = 'Not authenticated';
+    }
+  } catch { if (statusEl) statusEl.textContent = 'Not authenticated'; }
+}
+
+function escHtml(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }

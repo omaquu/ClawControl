@@ -810,6 +810,136 @@ app.post('/api/gateway/disconnect', requireAuth, (req, res) => {
 });
 
 
+// ─── Gateway Agents & Chat ────────────────────────────────────────────────────
+app.get('/api/gateway/agents', requireAuth, (req, res) => {
+    res.json(gatewaySnapshot?.agents || []);
+});
+
+app.post('/api/gateway/chat', requireAuth, (req, res) => {
+    const { agentId, message } = req.body || {};
+    if (!agentId || !message) return res.status(400).json({ error: 'agentId and message required' });
+    if (!gatewayWs || gatewayWs.readyState !== WebSocket.OPEN) {
+        return res.status(503).json({ error: 'Gateway not connected' });
+    }
+    const requestId = 'chat-' + Date.now();
+    gatewayWs.send(JSON.stringify({
+        type: 'req',
+        id: requestId,
+        method: 'chat.send',
+        params: { agentId, text: message }
+    }));
+    res.json({ ok: true, requestId });
+});
+
+// ─── Google Antigravity OAuth ─────────────────────────────────────────────────
+const antigravityPending = new Map(); // state → { verifier, resolve }
+
+const ANTIGRAVITY_CLIENT_ID = process.env.ANTIGRAVITY_CLIENT_ID || '';
+const ANTIGRAVITY_CLIENT_SECRET = process.env.ANTIGRAVITY_CLIENT_SECRET || '';
+const ANTIGRAVITY_SCOPES = [
+    'https://www.googleapis.com/auth/cloud-platform',
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/userinfo.profile',
+    'https://www.googleapis.com/auth/cclog',
+    'https://www.googleapis.com/auth/experimentsandconfigs'
+].join(' ');
+
+app.post('/api/oauth/antigravity/start', requireAuth, (req, res) => {
+    const host = req.headers['x-forwarded-host'] || req.headers.host || `${req.hostname}:${PORT}`;
+    const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+    const redirectUri = `${proto}://${host}/auth/oauth/antigravity/callback`;
+
+    const verifier = crypto.randomBytes(32).toString('hex');
+    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+    const state = crypto.randomBytes(16).toString('hex');
+
+    antigravityPending.set(state, { verifier, redirectUri, ts: Date.now() });
+    // Cleanup stale pending states (older than 10m)
+    for (const [k, v] of antigravityPending) { if (Date.now() - v.ts > 600000) antigravityPending.delete(k); }
+
+    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    url.searchParams.set('client_id', ANTIGRAVITY_CLIENT_ID);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('redirect_uri', redirectUri);
+    url.searchParams.set('scope', ANTIGRAVITY_SCOPES);
+    url.searchParams.set('code_challenge', challenge);
+    url.searchParams.set('code_challenge_method', 'S256');
+    url.searchParams.set('state', state);
+    url.searchParams.set('access_type', 'offline');
+    url.searchParams.set('prompt', 'consent');
+
+    res.json({ authUrl: url.toString() });
+});
+
+app.get('/auth/oauth/antigravity/callback', async (req, res) => {
+    const { code, state, error } = req.query;
+    if (error) return res.send(`<h1>OAuth Error</h1><p>${error}</p>`);
+
+    const pending = antigravityPending.get(state);
+    if (!pending) return res.send('<h1>Invalid or expired OAuth state</h1>');
+    antigravityPending.delete(state);
+
+    try {
+        const body = new URLSearchParams({
+            client_id: ANTIGRAVITY_CLIENT_ID,
+            client_secret: ANTIGRAVITY_CLIENT_SECRET,
+            code,
+            grant_type: 'authorization_code',
+            redirect_uri: pending.redirectUri,
+            code_verifier: pending.verifier
+        });
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body
+        });
+        if (!tokenRes.ok) throw new Error(await tokenRes.text());
+        const tokens = await tokenRes.json();
+
+        // Fetch user email
+        let email;
+        try {
+            const uRes = await fetch('https://www.googleapis.com/oauth2/v1/userinfo?alt=json', { headers: { Authorization: `Bearer ${tokens.access_token}` } });
+            const u = await uRes.json(); email = u.email;
+        } catch { }
+
+        // Fetch project ID
+        let projectId = 'rising-fact-p41fc';
+        for (const ep of ['https://cloudcode-pa.googleapis.com', 'https://daily-cloudcode-pa.sandbox.googleapis.com']) {
+            try {
+                const pRes = await fetch(`${ep}/v1internal:loadCodeAssist`, {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${tokens.access_token}`, 'Content-Type': 'application/json', 'User-Agent': 'google-api-nodejs-client/9.15.1' },
+                    body: JSON.stringify({ metadata: { ideType: 'IDE_UNSPECIFIED', platform: 'PLATFORM_UNSPECIFIED', pluginType: 'GEMINI' } })
+                });
+                if (pRes.ok) { const d = await pRes.json(); if (d.cloudaicompanionProject) { projectId = typeof d.cloudaicompanionProject === 'string' ? d.cloudaicompanionProject : (d.cloudaicompanionProject.id || projectId); break; } }
+            } catch { }
+        }
+
+        // Save to credentials
+        const creds = loadCreds() || {};
+        creds.antigravityToken = {
+            access: tokens.access_token,
+            refresh: tokens.refresh_token,
+            expires: Date.now() + (tokens.expires_in || 3600) * 1000 - 300000,
+            email, projectId
+        };
+        saveCreds(creds);
+        auditLog('antigravity_oauth_success', { email, projectId });
+
+        res.send(`<!DOCTYPE html><html><head><title>Auth Complete</title><script>window.opener?.postMessage({type:'antigravity-oauth-ok',email:'${email || ''}',projectId:'${projectId}'},'*');window.close();</script></head><body><h1>✅ Authentication complete</h1><p>You can close this tab.</p></body></html>`);
+    } catch (err) {
+        console.error('[OAuth] Antigravity error:', err.message);
+        res.send(`<h1>Auth failed</h1><p>${err.message}</p>`);
+    }
+});
+
+app.get('/api/oauth/antigravity/status', requireAuth, (req, res) => {
+    const creds = loadCreds() || {};
+    const t = creds.antigravityToken;
+    if (!t) return res.json({ connected: false });
+    const expired = t.expires && Date.now() > t.expires;
+    res.json({ connected: !expired, email: t.email, projectId: t.projectId, expiresAt: t.expires });
+});
+
 // ─── API: System — Network / PM2 / Docker ────────────────────────────────────
 app.get('/api/system/network', requireAuth, async (req, res) => {
     try {
@@ -1310,6 +1440,7 @@ let gatewayRetryAttempts = 0;
 let gatewayLastError = null;
 let gatewayLastConnectedAt = null;
 let gatewayRetryTimer = null;
+let gatewaySnapshot = null; // cached from health/connect events
 
 function triggerGatewayReconnect() {
     let creds = loadCreds();
@@ -1402,6 +1533,8 @@ function connectGateway() {
             const raw = data.toString();
             try {
                 const msg = JSON.parse(raw);
+
+                // Handle the connect challenge → send handshake
                 if (msg.type === 'event' && msg.event === 'connect.challenge') {
                     const gwToken = loadCreds()?.gatewayToken || process.env.OPENCLAW_GATEWAY_TOKEN || '';
                     const tokenSnippet = gwToken.length > 8 ? `${gwToken.slice(0, 4)}...${gwToken.slice(-4)}` : '(short token)';
@@ -1422,10 +1555,36 @@ function connectGateway() {
                             auth: { token: gwToken }
                         }
                     }));
+                    return; // don't forward challenge
                 }
+
+                // Cache health snapshot and emit compact event (not raw flood)
+                if (msg.type === 'event' && msg.event === 'health') {
+                    const prev = JSON.stringify(gatewaySnapshot?.agents?.map(a => a.agentId));
+                    gatewaySnapshot = msg.payload || {};
+                    const curr = JSON.stringify(gatewaySnapshot?.agents?.map(a => a.agentId));
+                    if (prev !== curr) {
+                        // Only broadcast when agent list changes, not on every health tick
+                        broadcastEvent({ type: 'GATEWAY_AGENTS_UPDATED', payload: { agents: gatewaySnapshot.agents || [] } });
+                    }
+                    return; // never forward raw health to SSE/clients
+                }
+
+                // Cache snapshot (initial connect response)
+                if (msg.type === 'res' && msg.id === 'handshake-1' && msg.ok && msg.payload?.snapshot) {
+                    gatewaySnapshot = { ...gatewaySnapshot, ...msg.payload.snapshot };
+                    broadcastEvent({ type: 'GATEWAY_CONNECTED_OK', payload: { connected: true } });
+                }
+
+                // Forward tick events as compact heartbeat (no raw data)
+                if (msg.type === 'event' && msg.event === 'tick') {
+                    broadcastEvent({ type: 'GATEWAY_TICK', payload: { ts: msg.payload?.ts } });
+                    return;
+                }
+
             } catch (e) { }
 
-            broadcastEvent({ type: 'GATEWAY_MSG', payload: { raw } });
+            // Forward all other messages to proxy clients (chat replies etc)
             gatewayClients.clients.forEach(c => { try { c.send(data); } catch { } });
         });
 
