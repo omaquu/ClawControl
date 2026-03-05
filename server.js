@@ -1367,7 +1367,7 @@ function connectGateway() {
                         method: 'connect',
                         params: {
                             minProtocol: 1,
-                            maxProtocol: 1,
+                            maxProtocol: 3,
                             client: {
                                 id: 'gateway-client',
                                 version: '1.0.0',
