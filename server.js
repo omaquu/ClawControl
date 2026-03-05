@@ -760,9 +760,10 @@ app.get('/api/events', requireAuth, async (req, res) => {
 app.get('/api/gateway/status', requireAuth, (req, res) => {
     const creds = loadCreds() || {};
     const url = creds.gatewayUrl || process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789';
+    const actually_connected = gatewayConnected && gatewayWs?.readyState === WebSocket.OPEN;
     res.json({
         url,
-        connected: gatewayConnected,
+        connected: actually_connected,
         lastError: gatewayLastError,
         lastConnectedAt: gatewayLastConnectedAt,
         reconnectAttempts: gatewayRetryAttempts
@@ -1403,6 +1404,8 @@ function connectGateway() {
                 const msg = JSON.parse(raw);
                 if (msg.type === 'event' && msg.event === 'connect.challenge') {
                     const gwToken = loadCreds()?.gatewayToken || process.env.OPENCLAW_GATEWAY_TOKEN || '';
+                    const tokenSnippet = gwToken.length > 8 ? `${gwToken.slice(0, 4)}...${gwToken.slice(-4)}` : '(short token)';
+                    console.log(`🔑 [Gateway] Sending connect handshake. Token length=${gwToken.length} snippet=${tokenSnippet}`);
                     gatewayWs.send(JSON.stringify({
                         type: 'req',
                         id: 'handshake-1',
