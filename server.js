@@ -711,6 +711,10 @@ app.post('/api/action/:action', requireAuth, async (req, res) => {
         setTimeout(() => process.exit(0), 500);
         return;
     }
+    if (action === 'restart-gateway') {
+        triggerGatewayReconnect();
+        return res.json({ ok: true });
+    }
     res.json({ ok: true });
 });
 
@@ -785,13 +789,7 @@ app.post('/api/gateway/config', requireAuth, (req, res) => {
     auditLog('gateway_config_updated', { url: creds.gatewayUrl });
 
     // Trigger immediate reconnect
-    if (gatewayWs) {
-        try { gatewayWs.terminate(); } catch (e) { }
-    } else {
-        if (gatewayRetryTimer) clearTimeout(gatewayRetryTimer);
-        gatewayRetryAttempts = 0;
-        connectGateway();
-    }
+    triggerGatewayReconnect();
 
     res.json({ ok: true });
 });
@@ -1311,6 +1309,25 @@ let gatewayRetryAttempts = 0;
 let gatewayLastError = null;
 let gatewayLastConnectedAt = null;
 let gatewayRetryTimer = null;
+
+function triggerGatewayReconnect() {
+    let creds = loadCreds();
+    if (creds) { creds.gatewayEnabled = true; saveCreds(creds); }
+
+    gatewayRetryAttempts = 0;
+    if (gatewayRetryTimer) {
+        clearTimeout(gatewayRetryTimer);
+        gatewayRetryTimer = null;
+    }
+    if (gatewayWs) {
+        gatewayWs.removeAllListeners('close');
+        gatewayWs.on('close', () => { });
+        try { gatewayWs.terminate(); } catch (e) { }
+        gatewayWs = null;
+    }
+    gatewayConnected = false;
+    connectGateway();
+}
 
 const gatewayClients = new WebSocketServer({ server, path: '/ws/gateway' });
 gatewayClients.on('connection', (ws, req) => {
