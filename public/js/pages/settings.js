@@ -84,6 +84,7 @@ function buildLayout() {
         </div>
         <div style="display:flex;gap:0.5rem;">
           <button class="btn btn-secondary btn-sm flex-1" data-action="save-gw-config">Save & Reconnect</button>
+          <button class="btn btn-danger btn-sm flex-1" data-action="disconnect-gateway"><i class="fa fa-stop"></i> Stop Reconnect</button>
           <button class="btn btn-secondary btn-sm flex-1" data-action="restart-gateway"><i class="fa fa-rotate"></i> Restart</button>
         </div>
       </div>
@@ -229,6 +230,7 @@ function bindEvents(el) {
     if (action === 'copy-token') navigator.clipboard.writeText(document.getElementById('api-token-display').value).then(() => window.showToast('Copied!', 'success'));
     if (action === 'nuke-data') nukeData();
     if (action === 'restart-gateway') window.apiFetch('/action/restart-gateway', { method: 'POST' }).then(() => window.showToast('Gateway restarted', 'info'));
+    if (action === 'disconnect-gateway') window.apiFetch('/api/gateway/disconnect', { method: 'POST' }).then(() => window.showToast('Gateway disconnected', 'info'));
     if (action === 'setup-mfa') setupMfa();
     if (action === 'disable-mfa') disableMfa();
     if (action === 'save-gw-config') {

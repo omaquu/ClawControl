@@ -780,6 +780,7 @@ app.post('/api/gateway/config', requireAuth, (req, res) => {
 
     creds.gatewayUrl = gatewayUrl.trim();
     creds.gatewayToken = gatewayToken.trim();
+    creds.gatewayEnabled = true;
     saveCreds(creds);
     auditLog('gateway_config_updated', { url: creds.gatewayUrl });
 
@@ -794,6 +795,21 @@ app.post('/api/gateway/config', requireAuth, (req, res) => {
 
     res.json({ ok: true });
 });
+
+app.post('/api/gateway/disconnect', requireAuth, (req, res) => {
+    let creds = loadCreds();
+    if (creds) {
+        creds.gatewayEnabled = false;
+        saveCreds(creds);
+    }
+
+    if (gatewayWs) { try { gatewayWs.terminate(); } catch (e) { } }
+    if (gatewayRetryTimer) { clearTimeout(gatewayRetryTimer); gatewayRetryTimer = null; }
+
+    gatewayConnected = false;
+    res.json({ ok: true });
+});
+
 
 // ─── API: System — Network / PM2 / Docker ────────────────────────────────────
 app.get('/api/system/network', requireAuth, async (req, res) => {
@@ -1318,6 +1334,12 @@ gatewayClients.on('connection', (ws, req) => {
 
 function connectGateway() {
     const creds = loadCreds() || {};
+
+    if (creds.gatewayEnabled === false) {
+        console.log('⚠️  [Gateway] Connection manually stopped by user. Not reconnecting.');
+        return;
+    }
+
     const gwUrl = creds.gatewayUrl || process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789';
     const gwToken = creds.gatewayToken || process.env.OPENCLAW_GATEWAY_TOKEN || '';
 
@@ -1348,11 +1370,14 @@ function connectGateway() {
 
         gatewayWs.on('open', () => {
             gatewayConnected = true;
-            gatewayRetryAttempts = 0;
             gatewayLastError = null;
             gatewayLastConnectedAt = Date.now();
             console.log(`✅ [Gateway] Connected to ${gwUrl}`);
             broadcastEvent({ type: 'GATEWAY_CONNECTED', payload: { url: gwUrl } });
+
+            // Only reset retry attempts if the connection stays stable for 5 seconds
+            // This prevents flood loops if it connects then immediately disconnects (e.g. protocol mismatch)
+            setTimeout(() => { if (gatewayConnected && gatewayWs?.readyState === WebSocket.OPEN) { gatewayRetryAttempts = 0; } }, 5000);
         });
 
         gatewayWs.on('message', (data) => {
