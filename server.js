@@ -209,6 +209,7 @@ app.use(helmet({
             imgSrc: ["'self'", "data:", "blob:"],
             connectSrc: ["'self'", "ws:", "wss:", "blob:"],
             workerSrc: ["'self'", "blob:"],
+            upgradeInsecureRequests: null,
         }
     },
     hsts: { maxAge: 31536000, includeSubDomains: true }
