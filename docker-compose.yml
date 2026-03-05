@@ -13,6 +13,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=7000
+      - DATA_DIR=/data
       - DATABASE_PATH=/data/clawcontrol.db
       - WORKSPACE_DIR=/workspace
       - OPENCLAW_DIR=/workspace

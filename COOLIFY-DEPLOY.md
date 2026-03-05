@@ -52,7 +52,7 @@ Under the **Storage** tab in your Coolify service settings, add two volumes:
    - Name: `mc_workspace`
    - Destination Path: `/workspace`
 
-*Note: The `/data` folder holds `clawcontrol.db` and audit logs. The `/workspace` folder holds `openclaw.json` and any files the agents manipulate.*
+*Note: The `/data` folder holds `clawcontrol.db`, `credentials.json` (your user accounts) and audit logs. The `/workspace` folder holds `openclaw.json` and any files the agents manipulate.*
 
 ## Step 5: Environment Variables
 
@@ -61,6 +61,7 @@ Under the **Environment Variables** tab in Coolify, add the following required v
 ```ini
 NODE_ENV=production
 PORT=7000
+DATA_DIR=/data
 DATABASE_PATH=/data/clawcontrol.db
 WORKSPACE_DIR=/workspace
 OPENCLAW_DIR=/workspace
