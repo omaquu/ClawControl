@@ -1,38 +1,38 @@
-// Agent Chat Page — supports both local DB agents and OpenClaw gateway agents
-let localAgents = [];
-let gatewayAgents = [];
-let allAgents = []; // merged: { id, name, source: 'local'|'gateway' }
+// Agent Chat Page — supports OpenClaw gateway agents
+let gatewayNodes = [];
 let selectedAgent = null;
 let chatMessages = [];
 let terminalWs = null;
 let terminalBuffer = '';
 
 export async function init(el, params = {}) {
-  [localAgents, gatewayAgents] = await Promise.all([
-    window.apiFetch('/agents').catch(() => []),
-    window.apiFetch('/api/gateway/agents').catch(() => [])
-  ]);
-  localAgents = localAgents || [];
-  gatewayAgents = gatewayAgents || [];
+  gatewayNodes = await window.apiFetch('/api/gateway/agents').catch(() => []);
+  gatewayNodes = gatewayNodes || [];
 
-  // Merge: gateway agents prefixed with 'gw:'
-  allAgents = [
-    ...localAgents.map(a => ({ ...a, source: 'local', displayName: a.name })),
-    ...gatewayAgents.map(a => ({ id: `gw:${a.agentId}`, agentId: a.agentId, name: a.name || a.agentId, displayName: `${a.name || a.agentId} (Gateway)`, source: 'gateway', status: 'active' }))
-  ];
+  // Map to unified format for chat UI
+  const allAgents = gatewayNodes.map(a => ({
+    id: a.id,
+    agentId: a.id,
+    name: a.name || a.id,
+    displayName: `${a.name || a.id} (${a.kind || 'unknown'})`,
+    status: a.status || 'offline',
+    source: 'gateway',
+    original: a
+  }));
 
   el.innerHTML = buildLayout(allAgents);
-  bindEvents(el);
+  bindEvents(el, allAgents);
 
-  // If navigation params requested a specific gateway agent
-  if (params?.agentId && params?.source === 'gateway') {
-    const target = allAgents.find(a => a.id === `gw:${params.agentId}`);
-    if (target) selectAgent(target, el);
+  if (params?.agentId) {
+    const target = allAgents.find(a => a.id === params.agentId);
+    if (target) selectAgent(target, el, allAgents);
   } else if (allAgents.length > 0) {
-    selectAgent(allAgents[0], el);
+    selectAgent(allAgents[0], el, allAgents);
   }
 
   window.addEventListener('mc:event', (e) => {
+    // Note: Gateway chat replies aren't currently broadcast as CHAT_MESSAGE in server.js
+    // but if we add them, this will catch it.
     if (e.detail.type === 'CHAT_MESSAGE' && e.detail.payload?.agent_id === selectedAgent?.id) {
       appendMessage(e.detail.payload);
     }
@@ -50,8 +50,7 @@ function buildLayout(agents) {
         <div style="display:flex;align-items:center;gap:0.75rem;">
           <select id="agent-selector" style="font-size:0.8rem;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:0.3rem 0.6rem;color:var(--color-text);">
             <option value="">Select agent…</option>
-            ${agents.length ? `<optgroup label="Local Agents">${agents.filter(a => a.source === 'local').map(a => `<option value="${a.id}">${escHtml(a.displayName)}</option>`).join('')}</optgroup>` : ''}
-            ${agents.filter(a => a.source === 'gateway').length ? `<optgroup label="Gateway Agents">${agents.filter(a => a.source === 'gateway').map(a => `<option value="${a.id}">${escHtml(a.displayName)}</option>`).join('')}</optgroup>` : ''}
+            ${agents.length ? agents.map(a => `<option value="${a.id}">${escHtml(a.displayName)}</option>`).join('') : ''}
           </select>
           <span id="agent-status-badge" class="badge badge-standby">standby</span>
         </div>
@@ -92,11 +91,11 @@ function buildLayout(agents) {
   </div>`;
 }
 
-function bindEvents(el) {
+function bindEvents(el, allAgents) {
   const selector = document.getElementById('agent-selector');
   selector?.addEventListener('change', () => {
     const agent = allAgents.find(a => a.id === selector.value);
-    if (agent) selectAgent(agent, el);
+    if (agent) selectAgent(agent, el, allAgents);
   });
   const input = document.getElementById('chat-input');
   const sendBtn = document.getElementById('chat-send');
@@ -110,12 +109,12 @@ function bindEvents(el) {
   });
 }
 
-async function selectAgent(agent, el) {
+async function selectAgent(agent, el, allAgents) {
   selectedAgent = agent;
   document.getElementById('agent-selector').value = agent.id;
   const badge = document.getElementById('agent-status-badge');
-  badge.className = `badge badge-${agent.status || 'standby'}`;
-  badge.textContent = agent.source === 'gateway' ? 'gateway' : (agent.status || 'standby');
+  badge.className = `badge ${agent.status === 'online' ? 'badge-success' : 'badge-danger'}`;
+  badge.textContent = agent.status;
   document.getElementById('chat-input').disabled = false;
   document.getElementById('chat-send').disabled = false;
 
@@ -123,26 +122,24 @@ async function selectAgent(agent, el) {
   container.innerHTML = '';
   chatMessages = [];
 
-  if (agent.source === 'local') {
-    // Load local chat history
-    const msgs = await window.apiFetch(`/chat/${agent.id}`).catch(() => []);
-    chatMessages = msgs || [];
-    chatMessages.forEach(appendMessage);
-  } else {
-    // Gateway agent — show info card
-    const info = gatewayAgents.find(a => a.agentId === agent.agentId);
-    if (info) {
-      const sessions = info.sessions?.count || 0;
-      const recent = info.sessions?.recent?.slice(0, 3) || [];
-      container.innerHTML = `<div class="card" style="margin:1rem;">
-                <div style="font-weight:600;margin-bottom:0.5rem;"><i class="fa fa-satellite-dish"></i> ${escHtml(info.name || info.agentId)}</div>
-                <div style="font-size:0.8rem;color:var(--color-text-muted);">Sessions: ${sessions} · Heartbeat: ${info.heartbeat?.enabled ? info.heartbeat.every : 'Off'}</div>
-                ${recent.length ? `<div style="margin-top:0.5rem;font-size:0.75rem;color:var(--color-text-muted);">Recent sessions:<br>${recent.map(s => `&nbsp;&nbsp;• ${escHtml(s.key)}`).join('<br>')}</div>` : ''}
-                <div style="margin-top:0.75rem;padding:0.5rem;background:var(--color-surface);border-radius:var(--radius-sm);font-size:0.75rem;color:#f59e0b;">
-                    <i class="fa fa-info-circle"></i> Type a message below to send to this gateway agent.
-                </div>
-            </div>`;
-    }
+  // Gateway agent — show info card
+  const info = agent.original;
+  if (info) {
+    const isDefault = info.isDefault ? '<span class="badge" style="background:#6366f1;color:white;margin-left:8px;">default</span>' : '';
+    const scopes = (info.scopes || []).join(', ') || 'none';
+    const lastPing = info.stats?.lastPing ? new Date(info.stats.lastPing).toLocaleTimeString() : 'never';
+
+    container.innerHTML = `<div class="card" style="margin:1rem;">
+              <div style="font-weight:600;margin-bottom:0.5rem;display:flex;align-items:center;">
+                <i class="fa fa-satellite-dish" style="margin-right:8px;"></i> ${escHtml(info.name || info.id)} ${isDefault}
+              </div>
+              <div style="font-size:0.8rem;color:var(--color-text-muted);">Kind: ${escHtml(info.kind)} · Status: ${escHtml(info.status)}</div>
+              <div style="font-size:0.75rem;color:var(--color-text-muted);margin-top:0.25rem;">Scopes: ${escHtml(scopes)}</div>
+              <div style="font-size:0.75rem;color:var(--color-text-muted);">Ping: ${lastPing}</div>
+              <div style="margin-top:0.75rem;padding:0.5rem;background:var(--color-surface);border-radius:var(--radius-sm);font-size:0.75rem;color:#f59e0b;">
+                  <i class="fa fa-info-circle"></i> Messages sent here are routed via the OpenClaw API Gateway.
+              </div>
+          </div>`;
   }
 }
 
@@ -167,13 +164,9 @@ async function sendMessage() {
   appendMessage(msg);
 
   try {
-    if (selectedAgent.source === 'gateway') {
-      // Send via gateway
-      const res = await window.apiFetch('/api/gateway/chat', { method: 'POST', body: { agentId: selectedAgent.agentId, message: content } });
-      if (!res.ok && !res.requestId) throw new Error(res.error || 'Gateway send failed');
-    } else {
-      await window.apiFetch(`/chat/${selectedAgent.id}`, { method: 'POST', body: { role: 'user', content } });
-    }
+    // Send via gateway
+    const res = await window.apiFetch('/api/gateway/chat', { method: 'POST', body: { agentId: selectedAgent.agentId, message: content } });
+    if (!res.ok && !res.requestId) throw new Error(res.error || 'Gateway send failed');
   } catch (e) { window.showToast('Failed to send: ' + e.message, 'error'); }
 }
 

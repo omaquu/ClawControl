@@ -302,13 +302,30 @@ async function loadSidebarAgents() {
 function addFeedItem(event) {
   const container = document.getElementById('feed-items');
   if (!container) return;
-  const typeClass = event.type?.includes('ERROR') ? 'type-error' : event.type?.includes('DONE') ? 'type-success' : '';
+
+  // Filter out noisy events from the Live Feed UI
+  const t = event.type || '';
+  if (
+    t.includes('TICK') ||
+    t === 'GATEWAY_MSG' ||
+    t === 'GATEWAY_CONNECTED' ||
+    t === 'GATEWAY_DISCONNECTED' ||
+    t === 'GATEWAY_NODES' ||
+    t === 'PROVIDER_HEALTH_CHANGED'
+  ) {
+    if (t !== 'GATEWAY_MSG' || !event.payload?.raw?.includes('"event":"error"')) {
+      // Only let GATEWAY_MSG through if it's an explicit error
+      return;
+    }
+  }
+
+  const typeClass = t.includes('ERROR') ? 'type-error' : t.includes('DONE') ? 'type-success' : '';
   const item = document.createElement('div');
   item.className = `feed-item ${typeClass}`;
-  item.innerHTML = `<div class="feed-item-type">${event.type || 'EVENT'}</div>
+  item.innerHTML = `<div class="feed-item-type">${t || 'EVENT'}</div>
     <div class="truncate text-xs" style="color:var(--color-text-muted);">${JSON.stringify(event.payload || {}).slice(0, 80)}</div>
     <div class="feed-item-time">${new Date().toLocaleTimeString()}</div>`;
-  item.addEventListener('click', () => openModal(`<div class="modal-header"><span class="modal-title">${event.type}</span><button class="icon-btn" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div> <pre style="font-size:0.78rem;overflow:auto;max-height:400px;">${JSON.stringify(event, null, 2)}</pre>`));
+  item.addEventListener('click', () => openModal(`<div class="modal-header"><span class="modal-title">${t}</span><button class="icon-btn" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div> <pre style="font-size:0.78rem;overflow:auto;max-height:400px;">${JSON.stringify(event, null, 2)}</pre>`));
   container.prepend(item);
   // Keep max 100 items
   while (container.children.length > 100) container.removeChild(container.lastChild);

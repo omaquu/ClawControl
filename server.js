@@ -137,12 +137,27 @@ const DATA_DIR = process.env.DATA_DIR || path.join(WORKSPACE_DIR, 'data');
 const DB_PATH = process.env.DATABASE_PATH || path.join(DATA_DIR, 'clawcontrol.db');
 const CREDENTIALS_PATH = path.join(DATA_DIR, 'credentials.json');
 const AUDIT_LOG = path.join(DATA_DIR, 'audit.log');
+const CLAWCONTROL_LOG = path.join(DATA_DIR, 'clawcontrol.log');
+const OPENCLAW_LOG = path.join(DATA_DIR, 'openclaw.log');
 const RECOVERY_TOKEN = process.env.DASHBOARD_TOKEN || crypto.randomBytes(16).toString('hex');
 
 // ─── Ensure dirs/token ────────────────────────────────────────────────────────
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(path.join(WORKSPACE_DIR, 'public'))) fs.mkdirSync(path.join(WORKSPACE_DIR, 'public'), { recursive: true });
 console.log(`🔑 Recovery token: ${RECOVERY_TOKEN}`);
+
+// ─── Console Logger ────────────────────────────────────────────────────────────
+function writeAppLog(level, args) {
+    const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+    const line = `[${new Date().toISOString()}] [${level.toUpperCase()}] ${msg}\n`;
+    fs.appendFile(CLAWCONTROL_LOG, line, () => { });
+}
+const origLog = console.log;
+console.log = function (...args) { origLog.apply(console, args); writeAppLog('info', args); };
+const origWarn = console.warn;
+console.warn = function (...args) { origWarn.apply(console, args); writeAppLog('warn', args); };
+const origErr = console.error;
+console.error = function (...args) { origErr.apply(console, args); writeAppLog('error', args); };
 
 
 
@@ -627,12 +642,17 @@ app.get('/api/logs', requireAuth, (req, res) => {
     let content = '';
     if (service === 'audit') {
         if (fs.existsSync(AUDIT_LOG)) content = fs.readFileSync(AUDIT_LOG, 'utf8');
+    } else if (service === 'clawcontrol') {
+        if (fs.existsSync(CLAWCONTROL_LOG)) content = fs.readFileSync(CLAWCONTROL_LOG, 'utf8');
+    } else if (service === 'openclaw') {
+        if (fs.existsSync(OPENCLAW_LOG)) content = fs.readFileSync(OPENCLAW_LOG, 'utf8');
     } else if (service === 'system') {
         content = `[ClawControl] Running on port ${PORT}\n[DB] ${DB_PATH}\n[Workspace] ${WORKSPACE_DIR}`;
     } else {
         content = `[${service}] Log access - service not running locally or not available via filesystem.\nConfigure log paths in environment variables.`;
     }
-    const result = content.split('\n').slice(-lines).join('\n');
+    // Limit to latest N lines efficiently
+    const result = content.trim().split('\n').filter(Boolean).slice(-lines).join('\n');
     res.json({ service, lines: result });
 });
 
@@ -812,7 +832,7 @@ app.post('/api/gateway/disconnect', requireAuth, (req, res) => {
 
 // ─── Gateway Agents & Chat ────────────────────────────────────────────────────
 app.get('/api/gateway/agents', requireAuth, (req, res) => {
-    res.json(gatewaySnapshot?.agents || []);
+    res.json(gatewayNodes || []);
 });
 
 app.post('/api/gateway/chat', requireAuth, (req, res) => {
@@ -1440,7 +1460,8 @@ let gatewayRetryAttempts = 0;
 let gatewayLastError = null;
 let gatewayLastConnectedAt = null;
 let gatewayRetryTimer = null;
-let gatewaySnapshot = null; // cached from health/connect events
+let gatewaySnapshot = null; // cached from health events
+let gatewayNodes = []; // cached from node.list requests
 
 function triggerGatewayReconnect() {
     let creds = loadCreds();
@@ -1534,6 +1555,11 @@ function connectGateway() {
             try {
                 const msg = JSON.parse(raw);
 
+                // Write to openclaw.log (excluding noisy health and tick events)
+                if (!(msg.type === 'event' && (msg.event === 'tick' || msg.event === 'health'))) {
+                    fs.appendFile(OPENCLAW_LOG, `[${new Date().toISOString()}] ${raw}\n`, () => { });
+                }
+
                 // Handle the connect challenge → send handshake
                 if (msg.type === 'event' && msg.event === 'connect.challenge') {
                     const gwToken = loadCreds()?.gatewayToken || process.env.OPENCLAW_GATEWAY_TOKEN || '';
@@ -1547,12 +1573,15 @@ function connectGateway() {
                             minProtocol: 1,
                             maxProtocol: 3,
                             client: {
-                                id: 'gateway-client',
-                                version: '1.0.0',
-                                platform: 'linux',
-                                mode: 'backend'
+                                id: 'clawcontrol',
+                                version: '2.0.0',
+                                platform: process.platform || 'linux',
+                                mode: 'backend',
+                                name: 'ClawControl',
+                                kind: 'operator'
                             },
-                            auth: { token: gwToken }
+                            auth: { token: gwToken },
+                            scopes: ['operator', 'operator.admin', 'operator.approvals', 'operator.pairing', 'webchat', 'dev']
                         }
                     }));
                     return; // don't forward challenge
@@ -1570,15 +1599,34 @@ function connectGateway() {
                     return; // never forward raw health to SSE/clients
                 }
 
-                // Cache snapshot (initial connect response)
-                if (msg.type === 'res' && msg.id === 'handshake-1' && msg.ok && msg.payload?.snapshot) {
-                    gatewaySnapshot = { ...gatewaySnapshot, ...msg.payload.snapshot };
-                    broadcastEvent({ type: 'GATEWAY_CONNECTED_OK', payload: { connected: true } });
+                // Handle handshake success -> immediately request node list
+                if (msg.type === 'res' && msg.id === 'handshake-1' && msg.ok) {
+                    if (msg.payload?.snapshot) {
+                        gatewaySnapshot = { ...gatewaySnapshot, ...msg.payload.snapshot };
+                    }
+                    console.log('✅ [Gateway] Handshake OK. Requesting node.list...');
+                    gatewayWs.send(JSON.stringify({ type: 'req', id: 'node-list-1', method: 'node.list', params: {} }));
+                    // Emit a smaller connected event, not the full snapshot to the feed
+                    broadcastEvent({ type: 'GATEWAY_CONNECTED_OK', payload: { connected: true, serverTime: msg.payload?.serverTime } });
+                    return;
                 }
 
-                // Forward tick events as compact heartbeat (no raw data)
+                // Handle node list response
+                if (msg.type === 'res' && msg.id === 'node-list-1' && msg.ok) {
+                    gatewayNodes = msg.payload?.nodes || [];
+                    broadcastEvent({ type: 'GATEWAY_NODES', payload: { nodes: gatewayNodes } });
+                    return; // don't forward raw lists to SSE feed
+                }
+
+                // Drop tick events completely
                 if (msg.type === 'event' && msg.event === 'tick') {
-                    broadcastEvent({ type: 'GATEWAY_TICK', payload: { ts: msg.payload?.ts } });
+                    return;
+                }
+
+                // Block verbose connection/disconnection events from flooding the UI
+                if (msg.type === 'event' && (msg.event === 'client.connected' || msg.event === 'client.disconnected')) {
+                    // Update our cache silently if it's an agent connecting/disconnecting
+                    gatewayWs.send(JSON.stringify({ type: 'req', id: 'node-list-update', method: 'node.list', params: {} }));
                     return;
                 }
 
