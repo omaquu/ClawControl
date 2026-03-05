@@ -212,7 +212,9 @@ app.use(helmet({
             upgradeInsecureRequests: null,
         }
     },
-    hsts: { maxAge: 31536000, includeSubDomains: true }
+    // Prevent forcing HTTPS on the dashboard causing SSL_ERROR_RX_RECORD_TOO_LONG
+    hsts: false,
+    referrerPolicy: { policy: "no-referrer" },
 }));
 
 
@@ -1354,7 +1356,31 @@ function connectGateway() {
         });
 
         gatewayWs.on('message', (data) => {
-            broadcastEvent({ type: 'GATEWAY_MSG', payload: { raw: data.toString() } });
+            const raw = data.toString();
+            try {
+                const msg = JSON.parse(raw);
+                if (msg.type === 'event' && msg.event === 'connect.challenge') {
+                    const gwToken = loadCreds()?.gatewayToken || process.env.OPENCLAW_GATEWAY_TOKEN || '';
+                    gatewayWs.send(JSON.stringify({
+                        type: 'req',
+                        id: 'handshake-1',
+                        method: 'connect',
+                        params: {
+                            minProtocol: 1,
+                            maxProtocol: 1,
+                            client: {
+                                id: 'gateway-client',
+                                version: '1.0.0',
+                                platform: 'linux',
+                                mode: 'backend'
+                            },
+                            auth: { token: gwToken }
+                        }
+                    }));
+                }
+            } catch (e) { }
+
+            broadcastEvent({ type: 'GATEWAY_MSG', payload: { raw } });
             gatewayClients.clients.forEach(c => { try { c.send(data); } catch { } });
         });
 
