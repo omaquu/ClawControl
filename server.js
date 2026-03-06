@@ -1612,6 +1612,8 @@ function connectGateway() {
                         id: 'handshake-1',
                         method: 'connect', // connect is preferred over connect.challenge for RPC
                         params: {
+                            minProtocol: 3,
+                            maxProtocol: 3,
                             client: {
                                 id: 'clawcontrol',
                                 version: '1.0.0',
