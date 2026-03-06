@@ -1,13 +1,15 @@
 // Files Manager Page
 let currentPath = '';
 let currentFilePath = '';
+let pathHistory = [''];
+let historyIdx = 0;
 
 export async function init(el) {
   el.innerHTML = buildLayout();
-  await loadDir('');
+  await loadDir('', true);
   bindEvents(el);
 }
-export async function refresh() { loadDir(currentPath); }
+export async function refresh() { loadDir(currentPath, true); }
 
 function buildLayout() {
   return `
@@ -15,7 +17,9 @@ function buildLayout() {
     <div class="file-tree" id="file-tree">
       <div style="padding:0.5rem;display:flex;gap:0.35rem;">
         <button class="btn btn-sm btn-ghost" data-file-action="home" title="Home"><i class="fa fa-house"></i></button>
-        <button class="btn btn-sm btn-ghost" data-file-action="new" title="New file"><i class="fa fa-plus"></i></button>
+        <button class="btn btn-sm btn-ghost" data-file-action="back" title="Back"><i class="fa fa-arrow-left"></i></button>
+        <button class="btn btn-sm btn-ghost" data-file-action="forward" title="Forward"><i class="fa fa-arrow-right"></i></button>
+        <button class="btn btn-sm btn-ghost" data-file-action="new" title="New file" style="margin-left:auto;"><i class="fa fa-plus"></i></button>
       </div>
       <div id="file-tree-items"></div>
     </div>
@@ -29,15 +33,24 @@ function buildLayout() {
         </div>
       </div>
       <div class="file-editor">
-        <div id="file-preview" style="display:none;padding:1rem;overflow:auto;flex:1;font-size:0.85rem;line-height:1.6;"></div>
+        <div id="file-preview" style="display:none;padding:1rem;overflow:auto;flex:1;font-size:0.85rem;line-height:1.6;align-items:center;justify-content:center;background:#050505;"></div>
         <textarea id="file-editor-area" class="code-editor" style="border:none;border-radius:0;height:100%;font-size:0.8rem;" placeholder="Select a file to edit…" disabled></textarea>
       </div>
     </div>
   </div>`;
 }
 
-async function loadDir(p) {
+async function loadDir(p, replaceHistory = false) {
   currentPath = p;
+
+  if (!replaceHistory) {
+    if (historyIdx < pathHistory.length - 1) {
+      pathHistory = pathHistory.slice(0, historyIdx + 1);
+    }
+    pathHistory.push(p);
+    historyIdx++;
+  }
+
   try {
     const data = await window.apiFetch(`/files?path=${encodeURIComponent(p)}`);
     if (!data) return;
@@ -75,16 +88,26 @@ async function openFile(p) {
 
   const ext = (p.split('.').pop() || '').toLowerCase();
   const imgExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'];
+  const vidExts = ['mp4', 'webm', 'ogg'];
   const area = document.getElementById('file-editor-area');
   const preview = document.getElementById('file-preview');
 
   if (imgExts.includes(ext)) {
     area.style.display = 'none';
-    preview.style.display = 'block';
+    preview.style.display = 'flex';
     const tok = localStorage.getItem('mc_session') || sessionStorage.getItem('mc_session');
-    preview.innerHTML = `<div style="text-align:center;"><img src="/api/file?path=${encodeURIComponent(p)}&token=${tok}" style="max-width:100%;max-height:60vh;border-radius:var(--radius);" onerror="this.alt='Load error';"></div>`;
+    preview.innerHTML = `<img src="/api/file?path=${encodeURIComponent(p)}&token=${tok}" style="max-width:100%;max-height:80vh;border-radius:var(--radius);object-fit:contain;box-shadow:0 10px 30px rgba(0,0,0,0.5);" onerror="this.alt='Load error';">`;
     return;
   }
+
+  if (vidExts.includes(ext)) {
+    area.style.display = 'none';
+    preview.style.display = 'flex';
+    const tok = localStorage.getItem('mc_session') || sessionStorage.getItem('mc_session');
+    preview.innerHTML = `<video src="/api/file?path=${encodeURIComponent(p)}&token=${tok}" style="max-width:100%;max-height:80vh;border-radius:var(--radius);object-fit:contain;box-shadow:0 10px 30px rgba(0,0,0,0.5);" controls controlsList="nodownload" autoplay></video>`;
+    return;
+  }
+
   preview.style.display = 'none';
   area.style.display = 'block';
   area.disabled = false;
@@ -145,6 +168,25 @@ function bindEvents(el) {
   el.addEventListener('click', (e) => {
     const action = e.target.closest('[data-file-action]')?.dataset.fileAction;
     if (action === 'home') { loadDir(''); return; }
+
+    // History Navigation
+    if (action === 'back') {
+      if (historyIdx > 0) {
+        historyIdx--;
+        currentPath = pathHistory[historyIdx];
+        loadDir(currentPath, true);
+      }
+      return;
+    }
+    if (action === 'forward') {
+      if (historyIdx < pathHistory.length - 1) {
+        historyIdx++;
+        currentPath = pathHistory[historyIdx];
+        loadDir(currentPath, true);
+      }
+      return;
+    }
+
     if (action === 'new') { openNewFileModal(); return; }
     if (action === 'save') { saveFile(); return; }
     if (action === 'copy') { copyFileContent(); return; }

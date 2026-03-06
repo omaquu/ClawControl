@@ -578,8 +578,8 @@ app.get('/api/file', requireAuth, (req, res) => {
     try {
         const target = safePath(req.query.path || '');
         const ext = path.extname(target).toLowerCase();
-        const imgExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico'];
-        if (imgExts.includes(ext)) {
+        const mediaExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.mp4', '.webm', '.ogg'];
+        if (mediaExts.includes(ext)) {
             return res.sendFile(target);
         }
         const content = fs.readFileSync(target, 'utf8');
@@ -842,8 +842,9 @@ function getAgentsFromConfig() {
             // Bring in Gateway nodes for live status overlays, but openclaw.json is the source of truth
             const liveNodes = new Map(gatewayNodes.map(n => [n.id, n]));
 
-            return list.map(a => {
+            const agents = list.map(a => {
                 const live = liveNodes.get(a.id);
+                if (live) liveNodes.delete(a.id); // Marked as processed
                 return {
                     id: a.id,
                     name: a.identity?.name || a.name || a.id,
@@ -851,14 +852,23 @@ function getAgentsFromConfig() {
                     status: live ? live.status : 'idle', // Layer live gateway status over static config if available
                     isDefault: Boolean(a.default),
                     model: typeof a.model === 'string' ? a.model : a.model?.primary || 'unknown',
+                    scopes: live?.scopes || [],
                     stats: live?.stats || { lastPing: Date.now() }
                 };
             });
+
+            // Append any dynamically connected objects (operators, tools, runtime-only agents)
+            for (const [_, live] of liveNodes) {
+                agents.push(live);
+            }
+
+            return agents;
         }
     } catch (e) {
         console.error('Failed to read openclaw.json:', e);
     }
-    // Fallback if local file read fails entirely
+
+    // If openclaw.json is missing or failed to parse, fallback to the gateway's cached nodes
     return gatewayNodes || [];
 }
 
@@ -1600,24 +1610,24 @@ function connectGateway() {
                     gatewayWs.send(JSON.stringify({
                         type: 'req',
                         id: 'handshake-1',
-                        method: 'connect',
+                        method: 'connect', // connect is preferred over connect.challenge for RPC
                         params: {
-                            minProtocol: 3,
-                            maxProtocol: 3,
                             client: {
-                                id: 'gateway-client',
+                                id: 'clawcontrol',
                                 version: '1.0.0',
-                                platform: 'linux',
-                                mode: 'backend'
+                                platform: process.platform,
+                                mode: 'backend',
+                                instanceId: `pid-${process.pid}`
                             },
+                            role: 'operator',
+                            scopes: ['operator.admin', 'operator.approvals', 'operator.pairing'],
                             auth: { token: gwToken },
-                            scopes: ['operator.admin', 'operator.approvals', 'operator.pairing']
+                            locale: 'en-US',
+                            userAgent: '@openclaw/dashboard'
                         }
                     }));
                     return; // don't forward challenge
                 }
-
-                // Helper to map complex health agents to UI format
                 function mapHealthAgents(agentsArr) {
                     if (!Array.isArray(agentsArr)) return [];
                     return agentsArr.map(a => ({
@@ -1640,8 +1650,16 @@ function connectGateway() {
 
                 // Handle handshake success
                 if (msg.type === 'res' && msg.id === 'handshake-1' && msg.ok) {
-                    console.log('✅ [Gateway] Handshake OK. Requesting config.get & sessions.list...');
+                    console.log('✅ [Gateway] Handshake OK. Requesting node.list, config.get & sessions.list...');
                     broadcastEvent({ type: 'GATEWAY_CONNECTED_OK', payload: { connected: true, serverTime: msg.payload?.serverTime } });
+
+                    // Request actual active nodes (operators and gateways)
+                    gatewayWs.send(JSON.stringify({
+                        type: 'req',
+                        id: 'node-list',
+                        method: 'node.list',
+                        params: {}
+                    }));
 
                     // Request actual agents list from the config
                     gatewayWs.send(JSON.stringify({
@@ -1658,6 +1676,53 @@ function connectGateway() {
                         method: 'sessions.list',
                         params: {}
                     }));
+
+                    // Poll node.list periodically just like the OpenClaw Dashboard does
+                    if (gatewayWs.nodePoller) clearInterval(gatewayWs.nodePoller);
+                    gatewayWs.nodePoller = setInterval(() => {
+                        if (gatewayWs && gatewayWs.readyState === 1) {
+                            gatewayWs.send(JSON.stringify({ type: 'req', id: 'node-list', method: 'node.list', params: {} }));
+                        }
+                    }, 5000);
+                    return;
+                }
+
+                // Handle node.list response (Source of active operators and connected runtimes)
+                if (msg.type === 'res' && msg.id === 'node-list' && msg.ok) {
+                    const nodes = msg.payload?.nodes || [];
+
+                    // Keep existing `gatewayNodes` that were sourced from config, but overlay/add these live nodes
+                    const liveNodeMap = new Map((msg.payload?.nodes || []).map(n => [n.id || n.clientId, n]));
+
+                    const merged = [];
+                    // Add all config nodes first
+                    for (const n of gatewayNodes) {
+                        if (n.kind !== 'operator') {
+                            const live = liveNodeMap.get(n.id);
+                            if (live) {
+                                n.status = 'online';
+                                n.stats = live.stats || n.stats;
+                                liveNodeMap.delete(n.id);
+                            }
+                            merged.push(n);
+                        }
+                    }
+
+                    // Add remaining live nodes (these are Operators, CLI tools, etc)
+                    for (const [_, live] of liveNodeMap) {
+                        merged.push({
+                            id: live.id || live.clientId || 'unknown',
+                            name: live.name || live.clientId || 'Unknown Node',
+                            kind: live.role === 'operator' ? 'operator' : (live.kind || 'agent'),
+                            status: 'online',
+                            isDefault: false,
+                            scopes: live.scopes || [],
+                            stats: live.stats || { lastPing: Date.now() }
+                        });
+                    }
+
+                    gatewayNodes = merged;
+                    broadcastEvent({ type: 'GATEWAY_NODES', payload: { nodes: getAgentsFromConfig() } });
                     return;
                 }
 
