@@ -1571,7 +1571,7 @@ function connectGateway() {
                         id: 'handshake-1',
                         method: 'connect',
                         params: {
-                            minProtocol: 1,
+                            minProtocol: 3,
                             maxProtocol: 3,
                             client: {
                                 id: 'webchat',
@@ -1579,8 +1579,14 @@ function connectGateway() {
                                 platform: 'Win32',
                                 mode: 'operator'
                             },
+                            role: 'operator',
+                            scopes: ['operator.admin', 'operator.approvals', 'operator.pairing'],
+                            caps: [],
+                            commands: [],
+                            permissions: {},
                             auth: { token: gwToken },
-                            scopes: ['operator.admin', 'operator.approvals', 'operator.pairing', 'webchat', 'dev']
+                            locale: 'en-US',
+                            userAgent: 'clawcontrol/2.0.0'
                         }
                     }));
                     return; // don't forward challenge
@@ -1668,7 +1674,9 @@ function connectGateway() {
         gatewayRetryTimer = setTimeout(connectGateway, delay);
     }
 }
-connectGateway();
+// Delay initial connection by 10s so OpenClaw gateway has time to start first
+setTimeout(connectGateway, 10000);
+console.log('⏳ [Gateway] Initial connection delayed 10s to allow gateway startup...');
 
 // Initialize DB and start server
 initDb().then(() => {
