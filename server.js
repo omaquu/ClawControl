@@ -1571,21 +1571,16 @@ function connectGateway() {
                         id: 'handshake-1',
                         method: 'connect',
                         params: {
-                            minProtocol: 3,
+                            minProtocol: 1,
                             maxProtocol: 3,
                             client: {
-                                id: 'webchat',
-                                version: '2.0.0',
-                                platform: 'Win32'
+                                id: 'gateway-client',
+                                version: '1.0.0',
+                                platform: 'linux',
+                                mode: 'backend'
                             },
-                            role: 'operator',
-                            scopes: ['operator.admin', 'operator.approvals', 'operator.pairing'],
-                            caps: [],
-                            commands: [],
-                            permissions: {},
                             auth: { token: gwToken },
-                            locale: 'en-US',
-                            userAgent: 'clawcontrol/2.0.0'
+                            scopes: ['operator.admin', 'operator.approvals', 'operator.pairing']
                         }
                     }));
                     return; // don't forward challenge
