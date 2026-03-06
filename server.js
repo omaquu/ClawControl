@@ -1586,41 +1586,46 @@ function connectGateway() {
                     return; // don't forward challenge
                 }
 
+                // Helper to map complex health agents to UI format
+                function mapHealthAgents(agentsArr) {
+                    if (!Array.isArray(agentsArr)) return [];
+                    return agentsArr.map(a => ({
+                        id: a.agentId,
+                        name: a.name || a.agentId,
+                        kind: 'agent',
+                        status: 'online',
+                        isDefault: a.isDefault,
+                        scopes: [],
+                        stats: { lastPing: Date.now() }
+                    }));
+                }
+
                 // Cache health snapshot and emit compact event (not raw flood)
                 if (msg.type === 'event' && msg.event === 'health') {
-                    // TEMP DEBUG: see what the gateway sends
-                    if (gatewayRetryAttempts < 2) console.log('DEBUG: Gateway Health Payload:', JSON.stringify(msg.payload).slice(0, 500));
-
-                    const prev = JSON.stringify(gatewaySnapshot?.agents?.map(a => a.agentId));
+                    const hAgents = msg.payload?.agents || [];
+                    const prev = JSON.stringify(gatewaySnapshot?.health?.agents?.map(a => a.agentId));
                     gatewaySnapshot = msg.payload || {};
-                    const curr = JSON.stringify(gatewaySnapshot?.agents?.map(a => a.agentId));
-                    if (prev !== curr) {
-                        // Only broadcast when agent list changes, not on every health tick
-                        broadcastEvent({ type: 'GATEWAY_AGENTS_UPDATED', payload: { agents: gatewaySnapshot.agents || [] } });
+                    const curr = JSON.stringify(hAgents.map(a => a.agentId));
+
+                    if (prev !== curr || !gatewayNodes.length) {
+                        gatewayNodes = mapHealthAgents(hAgents);
+                        broadcastEvent({ type: 'GATEWAY_NODES', payload: { nodes: gatewayNodes } });
                     }
                     return; // never forward raw health to SSE/clients
                 }
 
-                // Handle handshake success -> immediately request node list
+                // Handle handshake success
                 if (msg.type === 'res' && msg.id === 'handshake-1' && msg.ok) {
                     if (msg.payload?.snapshot) {
-                        gatewaySnapshot = { ...gatewaySnapshot, ...msg.payload.snapshot };
+                        gatewaySnapshot = msg.payload.snapshot;
+                        const hAgents = gatewaySnapshot.health?.agents || [];
+                        gatewayNodes = mapHealthAgents(hAgents);
+                        broadcastEvent({ type: 'GATEWAY_NODES', payload: { nodes: gatewayNodes } });
                     }
-                    console.log('✅ [Gateway] Handshake OK. Requesting node.list...');
-                    gatewayWs.send(JSON.stringify({ type: 'req', id: 'node-list-1', method: 'node.list', params: {} }));
+                    console.log('✅ [Gateway] Handshake OK. Initial snapshot processed.');
                     // Emit a smaller connected event, not the full snapshot to the feed
                     broadcastEvent({ type: 'GATEWAY_CONNECTED_OK', payload: { connected: true, serverTime: msg.payload?.serverTime } });
                     return;
-                }
-
-                // Handle node list response
-                if (msg.type === 'res' && msg.id === 'node-list-1' && msg.ok) {
-                    // TEMP DEBUG: see what the gateway sends
-                    console.log('DEBUG: Gateway node.list Payload:', JSON.stringify(msg.payload).slice(0, 500));
-
-                    gatewayNodes = msg.payload?.nodes || [];
-                    broadcastEvent({ type: 'GATEWAY_NODES', payload: { nodes: gatewayNodes } });
-                    return; // don't forward raw lists to SSE feed
                 }
 
                 // Drop tick events completely
@@ -1630,8 +1635,7 @@ function connectGateway() {
 
                 // Block verbose connection/disconnection events from flooding the UI
                 if (msg.type === 'event' && (msg.event === 'client.connected' || msg.event === 'client.disconnected')) {
-                    // Update our cache silently if it's an agent connecting/disconnecting
-                    gatewayWs.send(JSON.stringify({ type: 'req', id: 'node-list-update', method: 'node.list', params: {} }));
+                    // We don't need to poll node.list because we get health updates with agents
                     return;
                 }
 
