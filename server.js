@@ -222,6 +222,7 @@ app.use(helmet({
             styleSrc: ["'self'", "'unsafe-inline'", "fonts.googleapis.com", "cdnjs.cloudflare.com", "cdn.jsdelivr.net"],
             fontSrc: ["'self'", "fonts.gstatic.com", "cdnjs.cloudflare.com"],
             imgSrc: ["'self'", "data:", "blob:"],
+            mediaSrc: ["'self'", "data:", "blob:"],
             connectSrc: ["'self'", "ws:", "wss:", "blob:"],
             workerSrc: ["'self'", "blob:"],
             upgradeInsecureRequests: null,
@@ -249,7 +250,10 @@ app.use((req, res, next) => {
 function requireAuth(req, res, next) {
     const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
     if (token && MC_API_TOKEN && token === MC_API_TOKEN) return next();
-    const sessionId = req.headers['x-session-id'] || req.headers['authorization']?.replace('Session ', '');
+
+    // Check headers first, but fallback to token (since <img> tags send ?token=)
+    const sessionId = req.headers['x-session-id'] || req.headers['authorization']?.replace('Session ', '') || token;
+
     if (sessionId && sessions.has(sessionId)) {
         req.sessionId = sessionId;
         return next();
@@ -1615,7 +1619,7 @@ function connectGateway() {
                             minProtocol: 3,
                             maxProtocol: 3,
                             client: {
-                                id: 'clawcontrol',
+                                id: 'openclaw-dashboard',
                                 version: '1.0.0',
                                 platform: process.platform,
                                 mode: 'backend',
