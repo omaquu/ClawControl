@@ -1576,8 +1576,7 @@ function connectGateway() {
                             client: {
                                 id: 'webchat',
                                 version: '2.0.0',
-                                platform: 'Win32',
-                                mode: 'operator'
+                                platform: 'Win32'
                             },
                             role: 'operator',
                             scopes: ['operator.admin', 'operator.approvals', 'operator.pairing'],
