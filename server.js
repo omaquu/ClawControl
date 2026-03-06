@@ -1588,6 +1588,9 @@ function connectGateway() {
 
                 // Cache health snapshot and emit compact event (not raw flood)
                 if (msg.type === 'event' && msg.event === 'health') {
+                    // TEMP DEBUG: see what the gateway sends
+                    if (gatewayRetryAttempts < 2) console.log('DEBUG: Gateway Health Payload:', JSON.stringify(msg.payload).slice(0, 500));
+
                     const prev = JSON.stringify(gatewaySnapshot?.agents?.map(a => a.agentId));
                     gatewaySnapshot = msg.payload || {};
                     const curr = JSON.stringify(gatewaySnapshot?.agents?.map(a => a.agentId));
@@ -1612,6 +1615,9 @@ function connectGateway() {
 
                 // Handle node list response
                 if (msg.type === 'res' && msg.id === 'node-list-1' && msg.ok) {
+                    // TEMP DEBUG: see what the gateway sends
+                    console.log('DEBUG: Gateway node.list Payload:', JSON.stringify(msg.payload).slice(0, 500));
+
                     gatewayNodes = msg.payload?.nodes || [];
                     broadcastEvent({ type: 'GATEWAY_NODES', payload: { nodes: gatewayNodes } });
                     return; // don't forward raw lists to SSE feed
