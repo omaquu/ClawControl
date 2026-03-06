@@ -1571,7 +1571,7 @@ function connectGateway() {
                         id: 'handshake-1',
                         method: 'connect',
                         params: {
-                            minProtocol: 1,
+                            minProtocol: 3,
                             maxProtocol: 3,
                             client: {
                                 id: 'gateway-client',
