@@ -1574,13 +1574,13 @@ function connectGateway() {
                             minProtocol: 1,
                             maxProtocol: 3,
                             client: {
-                                id: 'webapp',
+                                id: 'webchat',
                                 version: '2.0.0',
-                                platform: process.platform || 'linux',
+                                platform: 'Win32',
                                 mode: 'operator'
                             },
                             auth: { token: gwToken },
-                            scopes: ['operator', 'operator.admin', 'operator.approvals', 'operator.pairing', 'webchat', 'dev']
+                            scopes: ['operator.admin', 'operator.approvals', 'operator.pairing', 'webchat', 'dev']
                         }
                     }));
                     return; // don't forward challenge
