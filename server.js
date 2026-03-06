@@ -1543,7 +1543,8 @@ function connectGateway() {
             gatewayLastError = null;
             gatewayLastConnectedAt = Date.now();
             console.log(`✅ [Gateway] Connected to ${gwUrl}`);
-            broadcastEvent({ type: 'GATEWAY_CONNECTED', payload: { url: gwUrl } });
+            // Log-only — do NOT broadcast GATEWAY_CONNECTED to SSE so the live feed doesn't flood.
+            fs.appendFile(OPENCLAW_LOG, `[${new Date().toISOString()}] GATEWAY_CONNECTED url=${gwUrl}\n`, () => { });
 
             // Only reset retry attempts if the connection stays stable for 5 seconds
             // This prevents flood loops if it connects then immediately disconnects (e.g. protocol mismatch)
@@ -1573,12 +1574,10 @@ function connectGateway() {
                             minProtocol: 1,
                             maxProtocol: 3,
                             client: {
-                                id: 'clawcontrol',
+                                id: 'cc-' + crypto.randomBytes(8).toString('hex'), // UUID-like unique id
                                 version: '2.0.0',
                                 platform: process.platform || 'linux',
-                                mode: 'backend',
-                                name: 'ClawControl',
-                                kind: 'operator'
+                                mode: 'operator'
                             },
                             auth: { token: gwToken },
                             scopes: ['operator', 'operator.admin', 'operator.approvals', 'operator.pairing', 'webchat', 'dev']
@@ -1645,8 +1644,11 @@ function connectGateway() {
             }
             const delay = Math.min(GATEWAY_RETRY_BASE * Math.pow(2, gatewayRetryAttempts), 30000);
             gatewayRetryAttempts++;
+            const logLine = `[${new Date().toISOString()}] GATEWAY_DISCONNECTED code=${code} reason=${reasonStr}\n`;
             console.log(`🔌 [Gateway] Disconnected (code ${code}: ${reasonStr}). Reconnecting in ${delay}ms...`);
-            broadcastEvent({ type: 'GATEWAY_DISCONNECTED', payload: { code, reason: reasonStr } });
+            fs.appendFile(OPENCLAW_LOG, logLine, () => { });
+            // Do NOT broadcast GATEWAY_DISCONNECTED to SSE — it floods the live feed during reconnect loops.
+            // The /api/gateway/status endpoint always reflects real-time connection state.
             if (gatewayRetryTimer) clearTimeout(gatewayRetryTimer);
             gatewayRetryTimer = setTimeout(connectGateway, delay);
         });

@@ -182,8 +182,11 @@ function initSSE() {
       if (event.type === 'PROVIDER_HEALTH_CHANGED') {
         window._providerRefresh?.();
       }
-      if (event.type === 'GATEWAY_DISCONNECTED' || event.type === 'GATEWAY_CONNECTED') {
+      if (event.type === 'GATEWAY_CONNECTED_OK') {
         initGateway();
+      }
+      if (event.type === 'GATEWAY_NODES') {
+        loadSidebarAgents();
       }
       // dispatch to page handlers
       window.dispatchEvent(new CustomEvent('mc:event', { detail: event }));
