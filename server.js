@@ -761,6 +761,7 @@ app.get('/api/live', (req, res) => {
         'X-Accel-Buffering': 'no'
     });
     res.write('data: {"type":"connected"}\n\n');
+    res.write(`data: ${JSON.stringify({ type: 'GATEWAY_NODES', payload: { nodes: getAgentsFromConfig() } })}\n\n`);
     const hb = setInterval(() => { try { res.write(':heartbeat\n\n'); } catch { } }, 30000);
     sseClients.add(res);
     req.on('close', () => { clearInterval(hb); sseClients.delete(res); });
@@ -828,8 +829,41 @@ app.post('/api/gateway/disconnect', requireAuth, (req, res) => {
 
 
 // ─── Gateway Agents & Chat ────────────────────────────────────────────────────
+
+// Reading from openclaw.json directly (tenacitOS style)
+function getAgentsFromConfig() {
+    try {
+        const configPath = path.join(OPENCLAW_DIR, 'openclaw.json');
+        if (fs.existsSync(configPath)) {
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            const list = config.agents?.list || [];
+            if (list.length === 0) list.push({ id: 'main', name: 'Main Agent', default: true });
+
+            // Bring in Gateway nodes for live status overlays, but openclaw.json is the source of truth
+            const liveNodes = new Map(gatewayNodes.map(n => [n.id, n]));
+
+            return list.map(a => {
+                const live = liveNodes.get(a.id);
+                return {
+                    id: a.id,
+                    name: a.identity?.name || a.name || a.id,
+                    kind: 'agent',
+                    status: live ? live.status : 'idle', // Layer live gateway status over static config if available
+                    isDefault: Boolean(a.default),
+                    model: typeof a.model === 'string' ? a.model : a.model?.primary || 'unknown',
+                    stats: live?.stats || { lastPing: Date.now() }
+                };
+            });
+        }
+    } catch (e) {
+        console.error('Failed to read openclaw.json:', e);
+    }
+    // Fallback if local file read fails entirely
+    return gatewayNodes || [];
+}
+
 app.get('/api/gateway/agents', requireAuth, (req, res) => {
-    res.json(gatewayNodes || []);
+    res.json(getAgentsFromConfig());
 });
 
 app.post('/api/gateway/chat', requireAuth, (req, res) => {
@@ -1599,29 +1633,95 @@ function connectGateway() {
 
                 // Cache health snapshot and emit compact event (not raw flood)
                 if (msg.type === 'event' && msg.event === 'health') {
-                    const hAgents = msg.payload?.agents || [];
-                    const prev = JSON.stringify(gatewaySnapshot?.health?.agents?.map(a => a.agentId));
+                    // Update stats but rely on config.get for true nodes
                     gatewaySnapshot = msg.payload || {};
-                    const curr = JSON.stringify(hAgents.map(a => a.agentId));
-
-                    if (prev !== curr || !gatewayNodes.length) {
-                        gatewayNodes = mapHealthAgents(hAgents);
-                        broadcastEvent({ type: 'GATEWAY_NODES', payload: { nodes: gatewayNodes } });
-                    }
                     return; // never forward raw health to SSE/clients
                 }
 
                 // Handle handshake success
                 if (msg.type === 'res' && msg.id === 'handshake-1' && msg.ok) {
-                    if (msg.payload?.snapshot) {
-                        gatewaySnapshot = msg.payload.snapshot;
-                        const hAgents = gatewaySnapshot.health?.agents || [];
-                        gatewayNodes = mapHealthAgents(hAgents);
-                        broadcastEvent({ type: 'GATEWAY_NODES', payload: { nodes: gatewayNodes } });
-                    }
-                    console.log('✅ [Gateway] Handshake OK. Initial snapshot processed.');
-                    // Emit a smaller connected event, not the full snapshot to the feed
+                    console.log('✅ [Gateway] Handshake OK. Requesting config.get & sessions.list...');
                     broadcastEvent({ type: 'GATEWAY_CONNECTED_OK', payload: { connected: true, serverTime: msg.payload?.serverTime } });
+
+                    // Request actual agents list from the config
+                    gatewayWs.send(JSON.stringify({
+                        type: 'req',
+                        id: 'config-get',
+                        method: 'config.get',
+                        params: {}
+                    }));
+
+                    // Request sessions to see who is active
+                    gatewayWs.send(JSON.stringify({
+                        type: 'req',
+                        id: 'sessions-list',
+                        method: 'sessions.list',
+                        params: {}
+                    }));
+                    return;
+                }
+
+                // Handle config.get response (True source of Agent Definitions from Gateway overlay)
+                if (msg.type === 'res' && msg.id === 'config-get' && msg.ok) {
+                    const parsed = msg.payload?.parsed || {};
+                    const resolved = msg.payload?.resolved || {};
+
+                    let agentsList = parsed?.agents?.list || [];
+                    if (!Array.isArray(agentsList)) agentsList = [];
+
+                    const resolvedList = resolved?.agents?.list || [];
+                    if (Array.isArray(resolvedList)) {
+                        const parsedIds = new Set(agentsList.map(a => a.id));
+                        for (const r of resolvedList) {
+                            if (r.id && !parsedIds.has(r.id)) agentsList.push(r);
+                        }
+                    }
+
+                    if (agentsList.length === 0) {
+                        agentsList.push({ id: 'main', name: 'Main Agent', default: true });
+                    }
+
+                    // Map to gatewayNodes memory
+                    gatewayNodes = agentsList.map(a => ({
+                        id: a.id,
+                        name: a.identity?.name || a.name || a.id,
+                        kind: 'agent',
+                        status: 'idle',
+                        isDefault: Boolean(a.default),
+                        model: typeof a.model === 'string' ? a.model : a.model?.primary || 'unknown',
+                        stats: { lastPing: Date.now() }
+                    }));
+
+                    // Emitting getAgentsFromConfig ensures local file read serves as base layer if available
+                    broadcastEvent({ type: 'GATEWAY_NODES', payload: { nodes: getAgentsFromConfig() } });
+                    return;
+                }
+
+                // Handle sessions.list to determine online/running status
+                if (msg.type === 'res' && msg.id === 'sessions-list' && msg.ok) {
+                    const sessions = msg.payload?.sessions || [];
+                    const activeAgentIds = new Set();
+
+                    const now = Date.now();
+                    for (const session of sessions) {
+                        const ageMs = session.ageMs > 0 ? session.ageMs : Math.max(0, now - (session.updatedAt * 1000));
+                        if (ageMs < 5 * 60 * 1000 && session.agentId) {
+                            activeAgentIds.add(session.agentId);
+                        }
+                    }
+
+                    let changed = false;
+                    for (const node of gatewayNodes) {
+                        const newStatus = activeAgentIds.has(node.id) ? 'online' : 'idle';
+                        if (node.status !== newStatus) {
+                            node.status = newStatus;
+                            changed = true;
+                        }
+                    }
+
+                    if (changed) {
+                        broadcastEvent({ type: 'GATEWAY_NODES', payload: { nodes: getAgentsFromConfig() } });
+                    }
                     return;
                 }
 
