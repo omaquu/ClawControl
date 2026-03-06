@@ -236,13 +236,10 @@ app.use(helmet({
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
-// HTTPS enforcement (skip localhost & Tailscale)
+// HTTPS enforcement (opt-in via FORCE_HTTPS)
 app.use((req, res, next) => {
-    const ip = req.ip || '';
-    const isLocal = ip === '127.0.0.1' || ip === '::1' || ip.startsWith('::ffff:127.');
-    const isTailscale = /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip);
-    const allowHttp = process.env.DASHBOARD_ALLOW_HTTP === 'true';
-    if (!allowHttp && !isLocal && !isTailscale && req.headers['x-forwarded-proto'] !== 'https' && req.protocol !== 'https') {
+    const forceHttps = process.env.FORCE_HTTPS === 'true';
+    if (forceHttps && req.headers['x-forwarded-proto'] !== 'https' && req.protocol !== 'https') {
         return res.redirect(301, 'https://' + req.hostname + req.url);
     }
     next();
