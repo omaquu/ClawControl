@@ -1614,23 +1614,18 @@ function connectGateway() {
                     gatewayWs.send(JSON.stringify({
                         type: 'req',
                         id: 'handshake-1',
-                        method: 'connect', // connect is preferred over connect.challenge for RPC
+                        method: 'connect',
                         params: {
-                            minProtocol: 3,
+                            minProtocol: 1,
                             maxProtocol: 3,
                             client: {
-                                id: 'openclaw-dashboard',
-                                version: 'mission-control',
-                                platform: process.platform,
-                                mode: 'backend',
-                                instanceId: `pid-${process.pid}`
+                                id: 'gateway-client',
+                                version: '1.0.0',
+                                platform: 'linux',
+                                mode: 'backend'
                             },
-                            role: 'operator',
-                            scopes: ['operator.admin', 'operator.approvals', 'operator.pairing'],
-                            caps: [],
                             auth: { token: gwToken },
-                            locale: 'en-US',
-                            userAgent: '@openclaw/dashboard'
+                            scopes: ['operator.admin', 'operator.approvals', 'operator.pairing']
                         }
                     }));
                     return; // don't forward challenge
