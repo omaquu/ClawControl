@@ -1620,13 +1620,14 @@ function connectGateway() {
                             maxProtocol: 3,
                             client: {
                                 id: 'openclaw-dashboard',
-                                version: '1.0.0',
+                                version: 'mission-control',
                                 platform: process.platform,
                                 mode: 'backend',
                                 instanceId: `pid-${process.pid}`
                             },
                             role: 'operator',
                             scopes: ['operator.admin', 'operator.approvals', 'operator.pairing'],
+                            caps: [],
                             auth: { token: gwToken },
                             locale: 'en-US',
                             userAgent: '@openclaw/dashboard'
