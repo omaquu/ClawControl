@@ -1574,7 +1574,7 @@ function connectGateway() {
                             minProtocol: 1,
                             maxProtocol: 3,
                             client: {
-                                id: 'cc-' + crypto.randomBytes(8).toString('hex'), // UUID-like unique id
+                                id: 'webapp',
                                 version: '2.0.0',
                                 platform: process.platform || 'linux',
                                 mode: 'operator'
