@@ -89,6 +89,7 @@ async function openFile(p) {
   const ext = (p.split('.').pop() || '').toLowerCase();
   const imgExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'];
   const vidExts = ['mp4', 'webm', 'ogg'];
+  const audExts = ['mp3', 'wav', 'flac'];
   const area = document.getElementById('file-editor-area');
   const preview = document.getElementById('file-preview');
 
@@ -105,6 +106,14 @@ async function openFile(p) {
     preview.style.display = 'flex';
     const tok = localStorage.getItem('mc_session') || sessionStorage.getItem('mc_session');
     preview.innerHTML = `<video src="/api/file?path=${encodeURIComponent(p)}&token=${tok}" style="max-width:100%;max-height:80vh;border-radius:var(--radius);object-fit:contain;box-shadow:0 10px 30px rgba(0,0,0,0.5);" controls controlsList="nodownload" autoplay></video>`;
+    return;
+  }
+  
+  if (audExts.includes(ext)) {
+    area.style.display = 'none';
+    preview.style.display = 'flex';
+    const tok = localStorage.getItem('mc_session') || sessionStorage.getItem('mc_session');
+    preview.innerHTML = `<audio src="/api/file?path=${encodeURIComponent(p)}&token=${tok}" style="width:100%;max-width:500px;outline:none;" controls controlsList="nodownload" autoplay></audio>`;
     return;
   }
 
@@ -134,7 +143,7 @@ function copyFileContent() {
 
 function downloadFile() {
   const area = document.getElementById('file-editor-area');
-  const blob = new Blob([area.value], { type: 'text/plain' });
+  const blob = new Blob([area.value], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = currentFilePath.split('/').pop() || 'file.txt'; a.click();
   URL.revokeObjectURL(url);

@@ -615,7 +615,7 @@ app.get('/api/file', requireAuth, (req, res) => {
     try {
         const target = safePath(req.query.path || '');
         const ext = path.extname(target).toLowerCase();
-        const mediaExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.mp4', '.webm', '.ogg'];
+        const mediaExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.mp4', '.webm', '.ogg', '.mp3', '.wav', '.flac'];
         if (mediaExts.includes(ext)) {
             return res.sendFile(target);
         }
