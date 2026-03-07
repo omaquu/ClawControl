@@ -2,19 +2,19 @@
 let channels = [];
 
 export async function init(el) {
-    el.innerHTML = buildLayout();
-    await load();
-    document.getElementById('new-channel-btn')?.addEventListener('click', openChannelModal);
+  el.innerHTML = buildLayout();
+  await load();
+  document.getElementById('new-channel-btn')?.addEventListener('click', () => window.openChannelModal());
 }
 export async function refresh(el) { await load(); }
 
 async function load() {
-    channels = (await window.apiFetch('/channels').catch(() => [])) || [];
-    renderChannels();
+  channels = (await window.apiFetch('/channels').catch(() => [])) || [];
+  renderChannels();
 }
 
 function buildLayout() {
-    return `
+  return `
   <div class="section-header">
     <div>
       <h2 class="section-title"><i class="fa fa-satellite-dish"></i> Channels</h2>
@@ -26,13 +26,13 @@ function buildLayout() {
 }
 
 function renderChannels() {
-    const grid = document.getElementById('channels-grid');
-    if (!grid) return;
-    if (!channels.length) {
-        grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><i class="fa fa-satellite-dish"></i><p>No channels tracked yet.<br>Add YouTube channels for agent research.</p></div>`;
-        return;
-    }
-    grid.innerHTML = channels.map(ch => `
+  const grid = document.getElementById('channels-grid');
+  if (!grid) return;
+  if (!channels.length) {
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><i class="fa fa-satellite-dish"></i><p>No channels tracked yet.<br>Add YouTube channels for agent research.</p></div>`;
+    return;
+  }
+  grid.innerHTML = channels.map(ch => `
   <div class="card">
     <div style="display:flex;align-items:flex-start;gap:0.75rem;margin-bottom:0.75rem;">
       <div style="width:48px;height:48px;border-radius:50%;background:${platformColor(ch.platform)};display:flex;align-items:center;justify-content:center;flex-shrink:0;">
@@ -58,8 +58,8 @@ function renderChannels() {
 }
 
 window.openChannelModal = function (id) {
-    const ch = id ? channels.find(c => c.id === id) : null;
-    window.openModal(`
+  const ch = id ? channels.find(c => c.id === id) : null;
+  window.openModal(`
   <div class="modal-header">
     <span class="modal-title">${ch ? 'Edit Channel' : 'Add Channel'}</span>
     <button class="icon-btn" onclick="closeModal()"><i class="fa fa-xmark"></i></button>
@@ -78,22 +78,22 @@ window.openChannelModal = function (id) {
 };
 
 window.saveChannel = async function (id) {
-    const name = document.getElementById('ch-name').value.trim();
-    const url = document.getElementById('ch-url').value.trim();
-    if (!name || !url) { window.showToast('Name and URL required', 'warning'); return; }
-    const body = { name, url, platform: document.getElementById('ch-platform').value, notes: document.getElementById('ch-notes').value };
-    try {
-        if (id) await window.apiFetch(`/channels/${id}`, { method: 'PUT', body });
-        else await window.apiFetch('/channels', { method: 'POST', body });
-        closeModal(); window.showToast('Saved!', 'success'); load();
-    } catch (e) { window.showToast(e.message, 'error'); }
+  const name = document.getElementById('ch-name').value.trim();
+  const url = document.getElementById('ch-url').value.trim();
+  if (!name || !url) { window.showToast('Name and URL required', 'warning'); return; }
+  const body = { name, url, platform: document.getElementById('ch-platform').value, notes: document.getElementById('ch-notes').value };
+  try {
+    if (id) await window.apiFetch(`/channels/${id}`, { method: 'PUT', body });
+    else await window.apiFetch('/channels', { method: 'POST', body });
+    closeModal(); window.showToast('Saved!', 'success'); load();
+  } catch (e) { window.showToast(e.message, 'error'); }
 };
 
 window.deleteChannel = async function (id) {
-    if (!confirm('Remove this channel?')) return;
-    await window.apiFetch(`/channels/${id}`, { method: 'DELETE' });
-    channels = channels.filter(c => c.id !== id); renderChannels();
-    window.showToast('Channel removed', 'info');
+  if (!confirm('Remove this channel?')) return;
+  await window.apiFetch(`/channels/${id}`, { method: 'DELETE' });
+  channels = channels.filter(c => c.id !== id); renderChannels();
+  window.showToast('Channel removed', 'info');
 };
 
 function platformColor(p) { const m = { 'YouTube': '#ff0000', 'Twitter/X': '#1da1f2', 'Twitch': '#9146ff', 'Podcast': '#f59e0b', 'Newsletter': '#10b981', 'Blog': '#6366f1' }; return m[p] || '#6b7280'; }

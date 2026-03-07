@@ -21,7 +21,7 @@ export async function init(el) {
 export async function refresh() { await load(); }
 
 async function load() {
-  gatewayNodes = await window.apiFetch('/api/gateway/agents').catch(() => []);
+  gatewayNodes = await window.apiFetch('/gateway/agents').catch(() => []);
   renderGatewayAgents();
 }
 

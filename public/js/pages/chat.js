@@ -6,7 +6,7 @@ let terminalWs = null;
 let terminalBuffer = '';
 
 export async function init(el, params = {}) {
-  gatewayNodes = await window.apiFetch('/api/gateway/agents').catch(() => []);
+  gatewayNodes = await window.apiFetch('/gateway/agents').catch(() => []);
   gatewayNodes = gatewayNodes || [];
 
   // Map to unified format for chat UI
@@ -165,7 +165,7 @@ async function sendMessage() {
 
   try {
     // Send via gateway
-    const res = await window.apiFetch('/api/gateway/chat', { method: 'POST', body: { agentId: selectedAgent.agentId, message: content } });
+    const res = await window.apiFetch('/gateway/chat', { method: 'POST', body: { agentId: selectedAgent.agentId, message: content } });
     if (!res.ok && !res.requestId) throw new Error(res.error || 'Gateway send failed');
   } catch (e) { window.showToast('Failed to send: ' + e.message, 'error'); }
 }

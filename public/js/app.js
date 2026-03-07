@@ -283,19 +283,22 @@ async function loadSidebarAgents() {
   const list = document.getElementById('sidebar-agents-list');
   if (!list) return;
   try {
-    const agents = await apiFetch('/agents');
+    const agents = await apiFetch('/gateway/agents');
     if (!agents || !agents.length) {
       list.innerHTML = '<div style="font-size:0.7rem;color:var(--color-text-muted);">No agents</div>';
       return;
     }
+    // Cache for kanban task modal
+    window._agents = agents;
     list.innerHTML = agents.map(a => {
-      const statusColor = a.status === 'active' ? 'var(--color-success)' : a.status === 'busy' ? 'var(--color-warning)' : a.status === 'error' ? 'var(--color-danger)' : 'var(--color-text-muted)';
+      const status = a.status || 'offline';
+      const statusColor = status === 'online' || status === 'active' ? 'var(--color-success)' : status === 'busy' ? 'var(--color-warning)' : status === 'error' ? 'var(--color-danger)' : 'var(--color-text-muted)';
       const statusDot = `<div style="width:6px;height:6px;border-radius:50%;background:${statusColor};flex-shrink:0;"></div>`;
-      return `<div class="sidebar-agent-item" style="display:flex;align-items:center;gap:0.4rem;padding:0.3rem 0;cursor:pointer;opacity:0.8;transition:0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'" onclick="document.querySelector('[data-page=agents]').click()">
+      return `<div class="sidebar-agent-item" style="display:flex;align-items:center;gap:0.4rem;padding:0.3rem 0;cursor:pointer;opacity:0.8;transition:0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'" onclick="window.navigate('chat', { agentId: '${a.id}' })">
         ${statusDot}
         <div style="flex:1;min-width:0;">
           <div style="font-size:0.75rem;font-weight:500;color:var(--color-text);" class="truncate">${a.name}</div>
-          <div style="font-size:0.65rem;color:var(--color-text-muted);" class="truncate">${a.model || 'No model'}</div>
+          <div style="font-size:0.65rem;color:var(--color-text-muted);" class="truncate">${a.kind || a.model || 'agent'}</div>
         </div>
       </div>`;
     }).join('');
@@ -444,6 +447,9 @@ const PAGE_ORDER = [
   'providers', 'memory', 'search', 'notifications', 'office3d'
 ];
 
+// Deep-link params store: window.navigate('chat', { agentId: 'x' }) stores params here before navigating
+const _pageParams = {};
+
 async function navigateTo(page) {
   if (!PAGE_TITLES[page]) page = 'kanban';
   currentPage = page;
@@ -460,21 +466,37 @@ async function navigateTo(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   pageEl.classList.add('active');
 
+  // Consume any stored params for this page
+  const params = _pageParams[page] || {};
+  delete _pageParams[page];
+
   if (!PAGE_MODULES[page]) {
     try {
       const mod = await import(`./pages/${page}.js`);
       PAGE_MODULES[page] = mod;
-      await mod.init(pageEl);
+      await mod.init(pageEl, params);
     } catch (e) {
       console.error(`[Router] Failed to load page "${page}":`, e);
       pageEl.innerHTML = `<div class="empty-state"><i class="fa fa-triangle-exclamation"></i><p>Page "${page}" failed to load.<br><small>${e.message}</small></p></div>`;
     }
   } else {
-    await PAGE_MODULES[page].refresh?.(pageEl);
+    // Re-init if params supplied (e.g. deep-link from agents page), otherwise just refresh
+    if (Object.keys(params).length) {
+      await PAGE_MODULES[page].init?.(pageEl, params);
+    } else {
+      await PAGE_MODULES[page].refresh?.(pageEl);
+    }
   }
 }
 // Expose for inline onclick attributes in HTML
 window.navigateTo = (page) => navigateTo(page);
+
+// Deep-link helper: store params for target page and navigate
+window.navigate = function (page, params = {}) {
+  if (params && Object.keys(params).length) _pageParams[page] = params;
+  navigateTo(page);
+};
+
 
 // Nav click handler
 document.querySelectorAll('.nav-item').forEach(el => {

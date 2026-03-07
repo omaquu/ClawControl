@@ -7,7 +7,7 @@ export async function init(el) {
     el.innerHTML = renderPage();
     try {
         await loadThree();
-        const agents = await window.apiFetch('/agents') || [];
+        const agents = await window.apiFetch('/gateway/agents') || [];
         buildScene(agents, el);
     } catch (e) {
         const wrap = el.querySelector('#office-wrap');

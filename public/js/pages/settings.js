@@ -39,7 +39,10 @@ function buildLayout() {
         <button class="tab-btn" data-tab="env">Env Vars</button>
       </div>
       <div id="tab-content" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
-        <textarea id="config-editor" class="code-editor" style="flex:1;border:none;border-radius:0;font-size:0.78rem;resize:none;padding:1rem;" spellcheck="false" placeholder="Loading openclaw.json…"></textarea>
+        <div style="display:flex;flex:1;overflow:hidden;">
+          <div id="line-numbers" style="padding:1rem 0.5rem;font-family:var(--font-mono);font-size:0.78rem;line-height:1.5;color:var(--color-text-muted);background:var(--color-surface);border-right:1px solid var(--color-border);user-select:none;text-align:right;min-width:2.8rem;overflow:hidden;white-space:pre;flex-shrink:0;">1</div>
+          <textarea id="config-editor" class="code-editor" style="flex:1;border:none;border-radius:0;font-size:0.78rem;resize:none;padding:1rem;line-height:1.5;" spellcheck="false" placeholder="Loading openclaw.json…"></textarea>
+        </div>
         <div id="visual-editor" style="flex:1;overflow-y:auto;padding:1rem;display:none;background:var(--color-surface);"></div>
       </div>
     </div>
@@ -99,7 +102,10 @@ function buildLayout() {
 
 function renderTabs() {
   const isRaw = currentTab === 'raw';
-  document.getElementById('config-editor').style.display = isRaw ? 'block' : 'none';
+  const editorWrap = document.getElementById('line-numbers')?.parentElement;
+  if (editorWrap) editorWrap.style.display = isRaw ? 'flex' : 'none';
+  const editor = document.getElementById('config-editor');
+  if (editor) editor.style.display = isRaw ? '' : 'none';
   const vis = document.getElementById('visual-editor');
   vis.style.display = isRaw ? 'none' : 'block';
 
@@ -154,8 +160,15 @@ async function loadConfig() {
   try {
     const data = await window.apiFetch('/config');
     const editor = document.getElementById('config-editor');
-    if (editor) { configText = JSON.stringify(JSON.parse(data?.content || '{}'), null, 2); editor.value = configText; }
-  } catch (e) { const ed = document.getElementById('config-editor'); if (ed) ed.value = '{\n  "error": "' + e.message + '"\n}'; }
+    if (editor) {
+      configText = JSON.stringify(JSON.parse(data?.content || '{}'), null, 2);
+      editor.value = configText;
+      updateLineNumbers();
+    }
+  } catch (e) {
+    const ed = document.getElementById('config-editor');
+    if (ed) { ed.value = '{\n  "error": "' + e.message + '"\n}'; updateLineNumbers(); }
+  }
 }
 
 async function loadAuthSettings() {
@@ -191,8 +204,14 @@ function bindEvents(el) {
   });
 
   editor?.addEventListener('input', () => {
+    updateLineNumbers();
     try { JSON.parse(editor.value); document.getElementById('json-error-badge')?.classList.add('hidden'); }
     catch { document.getElementById('json-error-badge')?.classList.remove('hidden'); }
+  });
+
+  editor?.addEventListener('scroll', () => {
+    const ln = document.getElementById('line-numbers');
+    if (ln) ln.scrollTop = editor.scrollTop;
   });
 
   uploader?.addEventListener('change', (e) => {
@@ -263,9 +282,18 @@ async function saveConfig() {
   }
 }
 
+function updateLineNumbers() {
+  const editor = document.getElementById('config-editor');
+  const ln = document.getElementById('line-numbers');
+  if (!editor || !ln) return;
+  const count = (editor.value.match(/\n/g) || []).length + 1;
+  ln.textContent = Array.from({ length: count }, (_, i) => i + 1).join('\n');
+  ln.scrollTop = editor.scrollTop;
+}
+
 function formatJson() {
   const editor = document.getElementById('config-editor');
-  try { editor.value = JSON.stringify(JSON.parse(editor.value), null, 2); document.getElementById('json-error-badge')?.classList.add('hidden'); } catch { }
+  try { editor.value = JSON.stringify(JSON.parse(editor.value), null, 2); document.getElementById('json-error-badge')?.classList.add('hidden'); updateLineNumbers(); } catch { }
 }
 
 async function changePassword() {

@@ -7,7 +7,7 @@ let activeVote = null; // vote currently in "reconsider" flow
 export async function init(el) {
   el.innerHTML = buildLayout();
   [agents, votes] = await Promise.all([
-    window.apiFetch('/agents').catch(() => []),
+    window.apiFetch('/gateway/agents').catch(() => []),
     window.apiFetch('/consul/votes').catch(() => [])
   ]);
   consulMessages = (await window.apiFetch('/consul/messages').catch(() => [])) || [];
@@ -85,7 +85,7 @@ function renderMessages() {
 }
 
 function statusColor(s) {
-  return { active: '#10b981', busy: '#f59e0b', error: '#ef4444', standby: '#6b7280' }[s] || '#6b7280';
+  return { online: '#10b981', active: '#10b981', busy: '#f59e0b', error: '#ef4444', offline: '#6b7280', standby: '#6b7280', idle: '#6b7280' }[s] || '#6b7280';
 }
 
 function renderVotes() {

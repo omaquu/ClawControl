@@ -604,10 +604,18 @@ app.post('/api/file', requireAuth, (req, res) => {
 
 // ─── API: Config (openclaw.json) ──────────────────────────────────────────────
 app.get('/api/config', requireAuth, (req, res) => {
+    // Try OPENCLAW_DIR first, then WORKSPACE_DIR as fallback
     const cfgPath = path.join(OPENCLAW_DIR, 'openclaw.json');
-    if (!fs.existsSync(cfgPath)) return res.json({ content: '{}', exists: false });
-    res.json({ content: fs.readFileSync(cfgPath, 'utf8'), exists: true });
+    if (fs.existsSync(cfgPath)) {
+        return res.json({ content: fs.readFileSync(cfgPath, 'utf8'), exists: true });
+    }
+    const wsCfgPath = path.join(WORKSPACE_DIR, 'openclaw.json');
+    if (fs.existsSync(wsCfgPath)) {
+        return res.json({ content: fs.readFileSync(wsCfgPath, 'utf8'), exists: true, path: wsCfgPath });
+    }
+    res.json({ content: '{}', exists: false });
 });
+
 
 app.post('/api/config', requireAuth, (req, res) => {
     const cfgPath = path.join(OPENCLAW_DIR, 'openclaw.json');
@@ -1061,9 +1069,21 @@ function findMemoryFiles(dir, baseDir, results = []) {
 }
 
 app.get('/api/memory', requireAuth, (req, res) => {
-    const files = findMemoryFiles(OPENCLAW_DIR, OPENCLAW_DIR);
+    // Search OPENCLAW_DIR first, then fallback to WORKSPACE_DIR and its 'memory' subfolder
+    let files = findMemoryFiles(OPENCLAW_DIR, OPENCLAW_DIR);
+    if (!files.length) {
+        // Fallback: search workspace memory subdir, then workspace root
+        const memDir = path.join(WORKSPACE_DIR, 'memory');
+        if (fs.existsSync(memDir)) {
+            files = findMemoryFiles(memDir, memDir);
+        }
+        if (!files.length) {
+            files = findMemoryFiles(WORKSPACE_DIR, WORKSPACE_DIR);
+        }
+    }
     res.json(files);
 });
+
 
 app.get('/api/memory/file', requireAuth, (req, res) => {
     try {
