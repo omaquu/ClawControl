@@ -635,6 +635,42 @@ app.post('/api/file', requireAuth, (req, res) => {
     } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+app.post('/api/file/rename', requireAuth, (req, res) => {
+    try {
+        const oldTarget = safePath(req.body.oldPath || '');
+        const newTarget = safePath(req.body.newPath || '');
+        if (!fs.existsSync(oldTarget)) return res.status(404).json({ error: 'File not found' });
+        // Prevent overwriting existing file unless it's just a case change
+        if (fs.existsSync(newTarget) && oldTarget.toLowerCase() !== newTarget.toLowerCase()) return res.status(400).json({ error: 'Destination already exists' });
+        fs.renameSync(oldTarget, newTarget);
+        auditLog('file_rename', { oldPath: req.body.oldPath, newPath: req.body.newPath });
+        res.json({ ok: true });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/file/copy', requireAuth, (req, res) => {
+    try {
+        const source = safePath(req.body.source || '');
+        const dest = safePath(req.body.dest || '');
+        if (!fs.existsSync(source)) return res.status(404).json({ error: 'Source not found' });
+        if (fs.existsSync(dest)) return res.status(400).json({ error: 'Destination already exists' });
+        const stat = fs.statSync(source);
+        if (stat.isDirectory()) return res.status(400).json({ error: 'Cannot duplicate directories yet' });
+        fs.copyFileSync(source, dest);
+        auditLog('file_copy', { source: req.body.source, dest: req.body.dest });
+        res.json({ ok: true });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/folder', requireAuth, (req, res) => {
+    try {
+        const target = safePath(req.body.path || '');
+        if (!fs.existsSync(target)) fs.mkdirSync(target, { recursive: true });
+        auditLog('folder_create', { path: req.body.path });
+        res.json({ ok: true });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 // ─── API: Config (openclaw.json) ──────────────────────────────────────────────
 app.get('/api/config', requireAuth, (req, res) => {
     // Try OPENCLAW_DIR first, then WORKSPACE_DIR as fallback

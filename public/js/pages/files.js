@@ -19,7 +19,10 @@ function buildLayout() {
         <button class="btn btn-sm btn-ghost" data-file-action="home" title="Home"><i class="fa fa-house"></i></button>
         <button class="btn btn-sm btn-ghost" data-file-action="back" title="Back"><i class="fa fa-arrow-left"></i></button>
         <button class="btn btn-sm btn-ghost" data-file-action="forward" title="Forward"><i class="fa fa-arrow-right"></i></button>
-        <button class="btn btn-sm btn-ghost" data-file-action="new" title="New file" style="margin-left:auto;"><i class="fa fa-plus"></i></button>
+        <div style="margin-left:auto;display:flex;gap:0.35rem;">
+          <button class="btn btn-sm btn-ghost" data-file-action="new-folder" title="New folder"><i class="fa fa-folder-plus"></i></button>
+          <button class="btn btn-sm btn-ghost" data-file-action="new" title="New file"><i class="fa fa-file-circle-plus"></i></button>
+        </div>
       </div>
       <div id="file-tree-items"></div>
     </div>
@@ -28,8 +31,9 @@ function buildLayout() {
         <span id="file-path" style="font-family:var(--font-mono);font-size:0.78rem;color:var(--color-text-muted);">/ (workspace root)</span>
         <div style="display:flex;gap:0.4rem;">
           <button class="btn btn-sm btn-secondary" id="file-save" data-file-action="save" disabled><i class="fa fa-save"></i> Save</button>
-          <button class="btn btn-sm btn-ghost" data-file-action="copy"><i class="fa fa-copy"></i></button>
-          <button class="btn btn-sm btn-ghost" id="file-download" data-file-action="download" disabled><i class="fa fa-download"></i></button>
+          <button class="btn btn-sm btn-ghost" id="file-rename" data-file-action="rename" disabled title="Rename file/extension"><i class="fa fa-pen"></i></button>
+          <button class="btn btn-sm btn-ghost" id="file-duplicate" data-file-action="duplicate" disabled title="Duplicate"><i class="fa fa-copy"></i></button>
+          <button class="btn btn-sm btn-ghost" id="file-download" data-file-action="download" disabled title="Download"><i class="fa fa-download"></i></button>
         </div>
       </div>
       <div class="file-editor">
@@ -73,18 +77,42 @@ function renderTree(items, basePath) {
   parts.forEach((p, i) => { breadcrumb += ` / <span class="file-crumb" data-crumb="${parts.slice(0, i + 1).join('/')}" style="cursor:pointer;color:var(--color-accent);">${escHtml(p)}</span>`; });
   breadcrumb += '</div>';
   container.innerHTML = breadcrumb + entries.map(f => `
-    <div class="file-tree-item ${f.isDir ? 'is-dir' : ''}" data-file-path="${escHtml(f.path)}" data-is-dir="${f.isDir ? '1' : '0'}">
+    <div class="file-tree-item ${f.isDir ? 'is-dir' : ''}" data-file-path="${escHtml(f.path)}" data-is-dir="${f.isDir ? '1' : '0'}"
+         draggable="true" 
+         ondragstart="window.onFileDragStart(event, '${escHtml(f.path)}')"
+         ${f.isDir ? `ondragover="window.onFileDragOver(event)" ondragleave="window.onFileDragLeave(event)" ondrop="window.onFileDrop(event, '${escHtml(f.path)}')"` : ''}>
       <i class="fa fa-${f.isDir ? 'folder-open' : getFileIcon(f.name)}"></i>
       <span class="truncate" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
       ${!f.isDir ? `<span style="font-size:0.65rem;color:var(--color-text-muted);margin-left:auto;">${fmtSize(f.size)}</span>` : ''}
     </div>`).join('');
 }
 
+window.onFileDragStart = (e, path) => {
+  e.dataTransfer.setData('text/plain', path);
+  e.dataTransfer.effectAllowed = 'move';
+};
+window.onFileDragOver = (e) => { e.preventDefault(); e.currentTarget.style.background = 'var(--color-divider)'; };
+window.onFileDragLeave = (e) => { e.currentTarget.style.background = ''; };
+window.onFileDrop = async (e, destFolder) => {
+  e.preventDefault(); e.currentTarget.style.background = '';
+  const srcPath = e.dataTransfer.getData('text/plain');
+  if (!srcPath || srcPath === destFolder || destFolder.startsWith(srcPath + '/')) return;
+  const fileName = srcPath.split('/').pop();
+  const newPath = destFolder ? `${destFolder}/${fileName}` : fileName;
+  try {
+    await window.apiFetch('/file/rename', { method: 'POST', body: { oldPath: srcPath, newPath } });
+    window.showToast('Moved!', 'success');
+    window.loadDir(currentPath);
+  } catch (err) { window.showToast(err.message, 'error'); }
+};
+
 async function openFile(p) {
   currentFilePath = p;
   document.getElementById('file-path').textContent = '/ ' + p;
   document.getElementById('file-save').disabled = false;
-  document.getElementById('file-download').disabled = false;
+  const btnRename = document.getElementById('file-rename'); if (btnRename) btnRename.disabled = false;
+  const btnDup = document.getElementById('file-duplicate'); if (btnDup) btnDup.disabled = false;
+  const btnDown = document.getElementById('file-download'); if (btnDown) btnDown.disabled = false;
 
   const ext = (p.split('.').pop() || '').toLowerCase();
   const imgExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'];
@@ -108,7 +136,7 @@ async function openFile(p) {
     preview.innerHTML = `<video src="/api/file?path=${encodeURIComponent(p)}&token=${tok}" style="max-width:100%;max-height:80vh;border-radius:var(--radius);object-fit:contain;box-shadow:0 10px 30px rgba(0,0,0,0.5);" controls controlsList="nodownload" autoplay></video>`;
     return;
   }
-  
+
   if (audExts.includes(ext)) {
     area.style.display = 'none';
     preview.style.display = 'flex';
@@ -168,6 +196,75 @@ function openNewFileModal() {
   };
 }
 
+function openNewFolderModal() {
+  window.openModal(`
+  <div class="modal-header"><span class="modal-title"><i class="fa fa-folder-plus"></i> New Folder</span>
+    <button class="icon-btn" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div>
+  <div class="form-group"><label class="form-label">Folder Name</label>
+    <input class="form-input" id="nf-folder-name" placeholder="new-folder"></div>
+  <div class="form-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" id="nf-folder-create"><i class="fa fa-save"></i> Create</button></div>`);
+  document.getElementById('nf-folder-create').onclick = async () => {
+    let name = document.getElementById('nf-folder-name').value.trim();
+    if (!name) return;
+    const p = currentPath ? `${currentPath}/${name}` : name;
+    await window.apiFetch('/folder', { method: 'POST', body: { path: p } });
+    closeModal(); window.showToast('Folder created!', 'success');
+    await loadDir(currentPath);
+  };
+}
+
+function openRenameModal() {
+  if (!currentFilePath) return;
+  const oldName = currentFilePath.split('/').pop();
+  window.openModal(`
+  <div class="modal-header"><span class="modal-title"><i class="fa fa-pen"></i> Rename File/Extension</span>
+    <button class="icon-btn" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div>
+  <div class="form-group"><label class="form-label">New Name/Extension</label>
+    <input class="form-input" id="rn-name" value="${escHtml(oldName)}"></div>
+  <div class="form-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" id="rn-save"><i class="fa fa-save"></i> Rename</button></div>`);
+  document.getElementById('rn-save').onclick = async () => {
+    let newName = document.getElementById('rn-name').value.trim();
+    if (!newName || newName === oldName) return;
+    const dir = currentFilePath.split('/').slice(0, -1).join('/');
+    const newPath = dir ? `${dir}/${newName}` : newName;
+    try {
+      await window.apiFetch('/file/rename', { method: 'POST', body: { oldPath: currentFilePath, newPath } });
+      closeModal(); window.showToast('Renamed!', 'success');
+      await loadDir(currentPath);
+      openFile(newPath);
+    } catch (e) { window.showToast(e.message, 'error'); }
+  };
+}
+
+function openDuplicateModal() {
+  if (!currentFilePath) return;
+  const oldName = currentFilePath.split('/').pop();
+  let parts = oldName.split('.');
+  let newName = parts.length > 1 ? parts.slice(0, -1).join('.') + '-copy.' + parts.pop() : oldName + '-copy';
+
+  window.openModal(`
+  <div class="modal-header"><span class="modal-title"><i class="fa fa-copy"></i> Duplicate File</span>
+    <button class="icon-btn" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div>
+  <div class="form-group"><label class="form-label">Duplicate Name</label>
+    <input class="form-input" id="dup-name" value="${escHtml(newName)}"></div>
+  <div class="form-actions"><button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-primary" id="dup-save"><i class="fa fa-save"></i> Duplicate</button></div>`);
+  document.getElementById('dup-save').onclick = async () => {
+    let name = document.getElementById('dup-name').value.trim();
+    if (!name) return;
+    const dir = currentFilePath.split('/').slice(0, -1).join('/');
+    const newPath = dir ? `${dir}/${name}` : name;
+    try {
+      await window.apiFetch('/file/copy', { method: 'POST', body: { source: currentFilePath, dest: newPath } });
+      closeModal(); window.showToast('Duplicated!', 'success');
+      await loadDir(currentPath);
+      openFile(newPath);
+    } catch (e) { window.showToast(e.message, 'error'); }
+  };
+}
+
 function bindEvents(el) {
   const area = document.getElementById('file-editor-area');
   area?.addEventListener('keydown', (e) => {
@@ -196,9 +293,11 @@ function bindEvents(el) {
       return;
     }
 
+    if (action === 'new-folder') { openNewFolderModal(); return; }
     if (action === 'new') { openNewFileModal(); return; }
     if (action === 'save') { saveFile(); return; }
-    if (action === 'copy') { copyFileContent(); return; }
+    if (action === 'rename') { openRenameModal(); return; }
+    if (action === 'duplicate') { openDuplicateModal(); return; }
     if (action === 'download') { downloadFile(); return; }
     const crumb = e.target.closest('[data-crumb]');
     if (crumb !== null && crumb !== undefined) { loadDir(crumb.dataset.crumb); return; }
