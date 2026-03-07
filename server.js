@@ -130,7 +130,8 @@ async function initDb() {
 const PORT = parseInt(process.env.DASHBOARD_PORT || '7000');
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || process.cwd();
 let OPENCLAW_DIR = process.env.OPENCLAW_DIR || path.join(process.env.HOME || process.env.USERPROFILE || '', '.openclaw');
-if (!process.env.OPENCLAW_DIR && fs.existsSync(path.join(WORKSPACE_DIR, 'openclaw.json'))) {
+if (!process.env.OPENCLAW_DIR) {
+    // Explicitly force OPENCLAW_DIR to be the current workspace directory to prevent config fragmentation
     OPENCLAW_DIR = WORKSPACE_DIR;
 }
 const MC_API_TOKEN = process.env.MC_API_TOKEN || '';
@@ -676,26 +677,22 @@ app.post('/api/folder', requireAuth, (req, res) => {
 
 // ─── API: Config (openclaw.json) ──────────────────────────────────────────────
 app.get('/api/config', requireAuth, (req, res) => {
-    // Try OPENCLAW_DIR first, then WORKSPACE_DIR as fallback
-    const cfgPath = path.join(OPENCLAW_DIR, 'openclaw.json');
-    if (fs.existsSync(cfgPath)) {
-        return res.json({ content: fs.readFileSync(cfgPath, 'utf8'), exists: true });
-    }
+    // Force read exact openclaw.json from the current workspace
     const wsCfgPath = path.join(WORKSPACE_DIR, 'openclaw.json');
     if (fs.existsSync(wsCfgPath)) {
         return res.json({ content: fs.readFileSync(wsCfgPath, 'utf8'), exists: true, path: wsCfgPath });
     }
-    res.json({ content: '{}', exists: false });
+    res.json({ content: '{}', exists: false, path: wsCfgPath });
 });
 
 
 app.post('/api/config', requireAuth, (req, res) => {
-    const cfgPath = path.join(OPENCLAW_DIR, 'openclaw.json');
+    // Force write exact openclaw.json to the current workspace
+    const cfgPath = path.join(WORKSPACE_DIR, 'openclaw.json');
     try { JSON.parse(req.body.content); } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
     if (fs.existsSync(cfgPath)) fs.copyFileSync(cfgPath, cfgPath + '.bak');
-    fs.mkdirSync(OPENCLAW_DIR, { recursive: true });
     fs.writeFileSync(cfgPath, req.body.content);
-    auditLog('config_write', {});
+    auditLog('config_write', { path: cfgPath });
     res.json({ ok: true });
 });
 
