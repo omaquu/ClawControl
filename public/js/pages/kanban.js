@@ -36,8 +36,11 @@ function buildBoard() {
         <option value="">All priorities</option>
         <option>HIGH</option><option>MEDIUM</option><option>LOW</option>
       </select>
-      <button class="btn btn-sm btn-ghost" id="toggle-archive-btn" title="Toggle Archive">
+    <button class="btn btn-sm btn-ghost" id="toggle-archive-btn" title="Toggle Archive">
         <i class="fa fa-archive"></i> Archive
+      </button>
+      <button class="btn btn-sm btn-ghost" id="import-gateway-btn" title="Import tasks from gateway agent activity">
+        <i class="fa fa-cloud-arrow-down"></i> Import from Gateway
       </button>
     </div>
     <div id="task-summary-bar" style="display:flex;gap:0.75rem;align-items:center;font-size:0.75rem;color:var(--color-text-muted);"></div>
@@ -186,7 +189,70 @@ function bindEvents(el) {
     document.getElementById('kanban-archive').style.display = showArchive ? 'block' : 'none';
     document.getElementById('toggle-archive-btn').classList.toggle('btn-secondary', showArchive);
   });
+  document.getElementById('import-gateway-btn')?.addEventListener('click', () => importGatewayTasks(el));
 }
+
+async function importGatewayTasks(el) {
+  const btn = document.getElementById('import-gateway-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Importing…'; }
+  try {
+    // Pull recent consul/chat messages sent by the user that could be tasks
+    const [consulMsgs, gatewayAgents] = await Promise.all([
+      window.apiFetch('/consul/messages').catch(() => []),
+      window.apiFetch('/gateway/agents').catch(() => [])
+    ]);
+    const agentMap = Object.fromEntries((gatewayAgents || []).map(a => [a.id, a.name]));
+    // Filter: user-role messages > 10 chars, within last 7 days
+    const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 86400;
+    const candidates = (consulMsgs || []).filter(m =>
+      m.role === 'user' && (m.content || '').length > 10 && (m.created_at || 0) > sevenDaysAgo
+    );
+    if (!candidates.length) {
+      window.showToast('No recent gateway messages to import', 'info');
+      return;
+    }
+    // Show import dialog
+    window.openModal(`
+    <div class="modal-header">
+      <span class="modal-title"><i class="fa fa-cloud-arrow-down"></i> Import from Gateway</span>
+      <button class="icon-btn" onclick="closeModal()"><i class="fa fa-xmark"></i></button>
+    </div>
+    <div style="font-size:0.8rem;color:var(--color-text-muted);margin-bottom:0.75rem;">
+      Select messages to import as Kanban tasks (INBOX):
+    </div>
+    <div style="max-height:300px;overflow-y:auto;">
+      ${candidates.slice(-20).reverse().map((m, i) => `
+      <div style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.4rem 0;border-bottom:1px solid var(--color-border);font-size:0.8rem;">
+        <input type="checkbox" id="imp-${i}" checked style="width:auto;flex-shrink:0;margin-top:2px;">
+        <label for="imp-${i}" style="cursor:pointer;flex:1;">
+          <div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(m.content.slice(0, 80))}${m.content.length > 80 ? '…' : ''}</div>
+          <div style="color:var(--color-text-muted);font-size:0.72rem;">${m.agent_name || 'User'} · ${timeAgo(m.created_at)}</div>
+        </label>
+      </div>`).join('')}
+    </div>
+    <div class="form-actions" style="margin-top:0.75rem;">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="window._doImport()"><i class="fa fa-check"></i> Create Tasks</button>
+    </div>`);
+    window._doImport = async () => {
+      const toImport = candidates.slice(-20).reverse().filter((_, i) => document.getElementById(`imp-${i}`)?.checked);
+      let created = 0;
+      for (const m of toImport) {
+        const title = m.content.slice(0, 100);
+        await window.apiFetch('/tasks', { method: 'POST', body: { title, status: 'INBOX', description: m.content, agent_id: m.agent_id || '' } }).catch(() => { });
+        created++;
+      }
+      closeModal();
+      window.showToast(`${created} task${created !== 1 ? 's' : ''} imported!`, 'success');
+      await loadTasks(el);
+    };
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa fa-cloud-arrow-down"></i> Import from Gateway'; }
+  }
+}
+
+function escHtml(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function timeAgo(ts) { if (!ts) return '—'; const d = Math.floor(Date.now() / 1000) - ts; return d < 60 ? `${d}s ago` : d < 3600 ? `${Math.floor(d / 60)}m ago` : d < 86400 ? `${Math.floor(d / 3600)}h ago` : `${Math.floor(d / 86400)}d ago`; }
 
 function openColorPicker(status, anchorEl) {
   const existing = document.getElementById('col-color-picker');

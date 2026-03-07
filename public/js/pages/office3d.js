@@ -2,6 +2,7 @@
 let _animId = null;
 let _renderer = null;
 let _ro = null;
+let _officeHandler = null;
 
 export async function init(el) {
     el.innerHTML = renderPage();
@@ -25,6 +26,7 @@ export function destroy() {
     if (_animId) { cancelAnimationFrame(_animId); _animId = null; }
     if (_renderer) { _renderer.dispose(); _renderer = null; }
     if (_ro) { _ro.disconnect(); _ro = null; }
+    if (_officeHandler) { window.removeEventListener('mc:event', _officeHandler); _officeHandler = null; }
 }
 
 function renderPage() {
@@ -637,10 +639,185 @@ function buildScene(agents, el) {
         }
     });
 
+    // ── Live agent state (SSE-driven) ─────────────────────────────────────────
+    // Build per-agent state: position targets, speech bubble, torso material ref
+    const agentStateMap = new Map(); // agentId → state object
+
+    // Speech bubble canvas texture helper
+    function makeSpeechBubble(text, color = '#eab308') {
+        const c = document.createElement('canvas'); c.width = 256; c.height = 72;
+        const ctx = c.getContext('2d');
+        // Bubble background
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        roundRect(ctx, 4, 4, 248, 54, 12);
+        // Border
+        ctx.strokeStyle = color; ctx.lineWidth = 2;
+        roundRect(ctx, 4, 4, 248, 54, 12, true);
+        // Text
+        ctx.fillStyle = color; ctx.font = 'bold 22px Inter, sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(text, 128, 32, 240);
+        // Tail
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        ctx.beginPath(); ctx.moveTo(114, 58); ctx.lineTo(128, 70); ctx.lineTo(142, 58); ctx.fill();
+        ctx.strokeStyle = color; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(114, 58); ctx.lineTo(128, 70); ctx.lineTo(142, 58); ctx.stroke();
+        return new THREE.CanvasTexture(c);
+    }
+    function roundRect(ctx, x, y, w, h, r, stroke = false) {
+        ctx.beginPath(); ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+        if (stroke) ctx.stroke(); else ctx.fill();
+    }
+
+    // Compute home position for an agent given zone and occupancy slot
+    function computeZonePos(agent, zoneKey, slotIdx) {
+        const zone = ZONES[zoneKey];
+        const row = Math.floor(slotIdx / 2), col = slotIdx % 2;
+        return { x: zone.cx + (col - 0.5) * 1.4, z: zone.cz - 1.5 + row * 1.3 };
+    }
+
+    avatarGroups.forEach(({ grp, agent }, idx) => {
+        // Find home zone for idle vs work zones
+        const idleZone = 'lounge';
+        const workZoneName = (() => {
+            const role = (agent.role || agent.name || '').toLowerCase();
+            for (const [key, z] of Object.entries(ZONES)) {
+                if (key !== 'lounge' && key !== 'bedroom' && z.roles.some(r => role.includes(r))) return key;
+            }
+            return 'coding';
+        })();
+
+        const currentPos = { x: grp.position.x, z: grp.position.z };
+        const speechBubbleMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(1.4, 0.45),
+            new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, visible: false })
+        );
+        speechBubbleMesh.position.set(grp.position.x, 1.85, grp.position.z);
+        scene.add(speechBubbleMesh);
+
+        // Find torso mesh (the BoxGeometry-based one) for colour updates
+        let torsoMat = null;
+        grp.traverse(m => {
+            if (m.isMesh && m.geometry instanceof THREE.BoxGeometry &&
+                m.geometry.parameters.width > 0.2 && m.geometry.parameters.height > 0.3) {
+                torsoMat = m.material;
+            }
+        });
+        // Find ALL body meshes for skin recolouring
+        const bodyMeshes = [];
+        grp.traverse(m => { if (m.isMesh && bodyMeshes.length < 8) bodyMeshes.push(m); });
+
+        agentStateMap.set(agent.id, {
+            grp,
+            agent: { ...agent },
+            status: agent.status || 'idle',
+            targetX: grp.position.x,
+            targetZ: grp.position.z,
+            idlePos: computeZonePos(agent, idleZone, idx),
+            workPos: computeZonePos(agent, workZoneName, 0),
+            speechBubbleMesh,
+            torsoMat,
+            bodyMeshes,
+            lingerTimer: null,
+        });
+    });
+
+    function updateAgentState(agentId, newStatus, message) {
+        const state = agentStateMap.get(agentId);
+        if (!state) return;
+        const prevStatus = state.status;
+        state.status = newStatus;
+
+        const isBusy = newStatus === 'busy' || newStatus === 'active' || newStatus === 'online';
+        const wasBusy = prevStatus === 'busy' || prevStatus === 'active';
+        const isIdle = newStatus === 'idle' || newStatus === 'standby';
+
+        // Body colour update
+        const newBodyCol = agentBodyColor(newStatus);
+        state.bodyMeshes.forEach(m => {
+            if (m.material && m !== state.torsoMat?.owner) {
+                // Only update skin meshes (not torso accent)
+                if (m.geometry instanceof THREE.SphereGeometry || m.geometry instanceof THREE.CylinderGeometry) {
+                    m.material.color.set(newBodyCol);
+                    m.material.emissive?.set(newBodyCol);
+                    m.material.needsUpdate = true;
+                }
+            }
+        });
+
+        // Speech bubble
+        if (isBusy) {
+            if (state.lingerTimer) { clearTimeout(state.lingerTimer); state.lingerTimer = null; }
+            const bubbleTex = makeSpeechBubble(message || 'WORKING...', '#f59e0b');
+            state.speechBubbleMesh.material.map = bubbleTex;
+            state.speechBubbleMesh.material.visible = true;
+            state.speechBubbleMesh.material.needsUpdate = true;
+            // Move toward work zone
+            state.targetX = state.workPos.x;
+            state.targetZ = state.workPos.z;
+        } else if (isIdle && wasBusy) {
+            // Show DONE for 6s then go back to lounge
+            const bubbleTex = makeSpeechBubble('DONE ✓', '#10b981');
+            state.speechBubbleMesh.material.map = bubbleTex;
+            state.speechBubbleMesh.material.visible = true;
+            state.speechBubbleMesh.material.needsUpdate = true;
+            state.lingerTimer = setTimeout(() => {
+                state.speechBubbleMesh.material.visible = false;
+                state.speechBubbleMesh.material.needsUpdate = true;
+                state.targetX = state.idlePos.x;
+                state.targetZ = state.idlePos.z;
+                state.lingerTimer = null;
+            }, 6000);
+        } else {
+            // Hide bubble for other transitions
+            if (!state.lingerTimer) {
+                state.speechBubbleMesh.material.visible = false;
+                state.speechBubbleMesh.material.needsUpdate = true;
+            }
+        }
+    }
+
+    // Listen for gateway status updates
+    const _officeEventHandler = (e) => {
+        const type = e.detail?.type;
+        const payload = e.detail?.payload;
+        if (type === 'GATEWAY_NODES' || type === 'GATEWAY_AGENTS_UPDATED') {
+            const updatedAgents = payload?.nodes || payload?.agents || [];
+            updatedAgents.forEach(a => {
+                const state = agentStateMap.get(a.id);
+                if (state && a.status !== state.status) {
+                    updateAgentState(a.id, a.status);
+                }
+            });
+        }
+        // Also react to chat/task events mentioning an agent
+        if (type === 'AGENT_TASK_START' || type === 'TASK_STARTED' || type === 'AGENT_STATUS_CHANGED') {
+            const agentId = payload?.agent_id || payload?.agentId;
+            const newStatus = payload?.status;
+            if (agentId && (newStatus === 'busy' || !newStatus)) {
+                updateAgentState(agentId, 'busy', payload?.task || payload?.event || 'WORKING...');
+            } else if (agentId && (newStatus === 'idle' || newStatus === 'standby')) {
+                updateAgentState(agentId, 'idle');
+            }
+        }
+        if (type === 'AGENT_TASK_DONE' || type === 'TASK_COMPLETED' || type === 'CHAT_RESPONSE') {
+            const agentId = payload?.agent_id || payload?.agentId;
+            if (agentId) updateAgentState(agentId, 'idle');
+        }
+    };
+    _officeHandler = _officeEventHandler;
+    window.addEventListener('mc:event', _officeHandler);
+
     // ── Billboard (name tags always face camera) ──
     const nameTags = [];
     scene.traverse(obj => {
-        if (obj.isMesh && obj.material?.map instanceof THREE.CanvasTexture && obj.geometry.parameters?.width > 0.8 && obj.geometry.parameters?.height < 0.4) {
+        if (obj.isMesh && obj.material?.map instanceof THREE.CanvasTexture &&
+            obj.geometry.parameters?.width > 0.8 && obj.geometry.parameters?.height < 0.4) {
             nameTags.push(obj);
         }
     });
@@ -650,16 +827,30 @@ function buildScene(agents, el) {
     function animate() {
         _animId = requestAnimationFrame(animate);
         t += 0.012;
-        // Bob entire humanoid groups
-        avatarGroups.forEach(({ grp }, i) => {
+
+        // Bob + lerp avatar groups to target position
+        avatarGroups.forEach(({ grp, agent }, i) => {
             grp.position.y = Math.sin(t + i * 1.4) * 0.04;
+            const state = agentStateMap.get(agent.id);
+            if (state) {
+                // Smooth lerp toward target
+                grp.position.x += (state.targetX - grp.position.x) * 0.03;
+                grp.position.z += (state.targetZ - grp.position.z) * 0.03;
+                // Speech bubble tracks above head
+                state.speechBubbleMesh.position.x = grp.position.x;
+                state.speechBubbleMesh.position.z = grp.position.z;
+                state.speechBubbleMesh.position.y = grp.position.y + 2.1;
+                state.speechBubbleMesh.lookAt(camera.position);
+            }
         });
-        // Name tags hover above head and face camera
+
+        // Name tags hover and face camera
         nameTags.forEach((tag, i) => {
-            const grp = avatarGroups[i];
-            if (grp) tag.position.y = grp.grp.position.y + 1.55;
+            const g = avatarGroups[i];
+            if (g) tag.position.set(g.grp.position.x, g.grp.position.y + 1.55, g.grp.position.z);
             tag.lookAt(camera.position);
         });
+
         controls.update();
         _renderer.render(scene, camera);
     }

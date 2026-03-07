@@ -2,14 +2,21 @@
 let sessions = [];
 
 export async function init(el) {
-    el.innerHTML = buildLayout();
-    await loadSessions(el);
-    bindEvents(el);
+  el.innerHTML = buildLayout();
+  await loadSessions(el);
+  bindEvents(el);
+  // Refresh when gateway session events arrive (Discord activity etc)
+  window.addEventListener('mc:event', (e) => {
+    const type = e.detail?.type;
+    if (type === 'SESSION_UPDATED' || type === 'SESSION_CREATED' || type === 'AGENT_STATUS_CHANGED') {
+      loadSessions(el);
+    }
+  });
 }
 export async function refresh(el) { await loadSessions(el); }
 
 function buildLayout() {
-    return `
+  return `
   <div class="stat-grid" id="session-stats"></div>
   <!-- Timeline -->
   <div class="card" style="margin-bottom:1rem;">
@@ -34,18 +41,18 @@ function buildLayout() {
 }
 
 async function loadSessions(el) {
-    sessions = (await window.apiFetch('/sessions').catch(() => [])) || [];
-    renderSessions();
-    renderStats();
-    populateModelFilter();
-    drawTimeline();
+  sessions = (await window.apiFetch('/sessions').catch(() => [])) || [];
+  renderSessions();
+  renderStats();
+  populateModelFilter();
+  drawTimeline();
 }
 
 function renderStats() {
-    const totalTokens = sessions.reduce((s, x) => s + (x.tokens || 0), 0);
-    const totalCost = sessions.reduce((s, x) => s + (x.cost || 0), 0);
-    const active = sessions.filter(s => s.status === 'active').length;
-    document.getElementById('session-stats').innerHTML = `
+  const totalTokens = sessions.reduce((s, x) => s + (x.tokens || 0), 0);
+  const totalCost = sessions.reduce((s, x) => s + (x.cost || 0), 0);
+  const active = sessions.filter(s => s.status === 'active').length;
+  document.getElementById('session-stats').innerHTML = `
     <div class="stat-card"><div class="stat-label">Sessions</div><div class="stat-value">${sessions.length}</div></div>
     <div class="stat-card"><div class="stat-label">Active</div><div class="stat-value text-success">${active}</div></div>
     <div class="stat-card"><div class="stat-label">Total Tokens</div><div class="stat-value">${fmtNum(totalTokens)}</div></div>
@@ -53,22 +60,22 @@ function renderStats() {
 }
 
 function populateModelFilter() {
-    const sel = document.getElementById('sess-model');
-    if (!sel) return;
-    const models = [...new Set(sessions.map(s => s.model).filter(Boolean))];
-    sel.innerHTML = '<option value="">All models</option>' + models.map(m => `<option>${m}</option>`).join('');
+  const sel = document.getElementById('sess-model');
+  if (!sel) return;
+  const models = [...new Set(sessions.map(s => s.model).filter(Boolean))];
+  sel.innerHTML = '<option value="">All models</option>' + models.map(m => `<option>${m}</option>`).join('');
 }
 
 function renderSessions() {
-    const search = document.getElementById('sess-search')?.value?.toLowerCase() || '';
-    const model = document.getElementById('sess-model')?.value || '';
-    const status = document.getElementById('sess-status')?.value || '';
-    const filtered = sessions.filter(s =>
-        (!search || (s.agent_name || s.agent_id || '').toLowerCase().includes(search) || (s.model || '').includes(search)) &&
-        (!model || s.model === model) &&
-        (!status || s.status === status));
-    document.getElementById('sess-count').textContent = `${filtered.length} sessions`;
-    document.getElementById('sessions-tbody').innerHTML = filtered.map(s => `
+  const search = document.getElementById('sess-search')?.value?.toLowerCase() || '';
+  const model = document.getElementById('sess-model')?.value || '';
+  const status = document.getElementById('sess-status')?.value || '';
+  const filtered = sessions.filter(s =>
+    (!search || (s.agent_name || s.agent_id || '').toLowerCase().includes(search) || (s.model || '').includes(search)) &&
+    (!model || s.model === model) &&
+    (!status || s.status === status));
+  document.getElementById('sess-count').textContent = `${filtered.length} sessions`;
+  document.getElementById('sessions-tbody').innerHTML = filtered.map(s => `
     <tr onclick="window.openSessionModal('${s.id}')" style="cursor:pointer;">
       <td><span class="status-dot ${s.status === 'active' ? 'online' : ''}" style="display:inline-block;margin-right:0.3rem;"></span></td>
       <td><span class="font-mono" style="font-size:0.78rem;">${s.agent_name || s.agent_id?.slice(0, 12) || '—'}</span></td>
@@ -82,34 +89,34 @@ function renderSessions() {
 }
 
 function drawTimeline() {
-    const canvas = document.getElementById('timeline-canvas');
-    if (!canvas || !sessions.length) return;
-    const ctx = canvas.getContext('2d');
-    canvas.width = canvas.parentElement.offsetWidth;
-    canvas.height = 80;
-    const colors = ['#6366f1', '#8b5cf6', '#10b981', '#f59e0b', '#3b82f6', '#ef4444'];
-    const now = Date.now() / 1000;
-    const range = 7 * 86400; // 7 days
-    sessions.slice(0, 8).forEach((s, i) => {
-        const start = Math.max(s.created_at || now - range, now - range);
-        const end = s.updated_at || now;
-        const x1 = ((start - (now - range)) / range) * canvas.width;
-        const x2 = ((end - (now - range)) / range) * canvas.width;
-        const y = 8 + i * 9;
-        ctx.fillStyle = colors[i % colors.length] + '33';
-        ctx.fillRect(x1, y, Math.max(x2 - x1, 4), 6);
-        ctx.fillStyle = colors[i % colors.length];
-        ctx.fillRect(x2 - 2, y, 4, 6);
-        ctx.fillStyle = '#94a3b8';
-        ctx.font = '9px Inter,sans-serif';
-        ctx.fillText(s.agent_name || s.agent_id?.slice(0, 8) || '?', 4, y + 5);
-    });
+  const canvas = document.getElementById('timeline-canvas');
+  if (!canvas || !sessions.length) return;
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.parentElement.offsetWidth;
+  canvas.height = 80;
+  const colors = ['#6366f1', '#8b5cf6', '#10b981', '#f59e0b', '#3b82f6', '#ef4444'];
+  const now = Date.now() / 1000;
+  const range = 7 * 86400; // 7 days
+  sessions.slice(0, 8).forEach((s, i) => {
+    const start = Math.max(s.created_at || now - range, now - range);
+    const end = s.updated_at || now;
+    const x1 = ((start - (now - range)) / range) * canvas.width;
+    const x2 = ((end - (now - range)) / range) * canvas.width;
+    const y = 8 + i * 9;
+    ctx.fillStyle = colors[i % colors.length] + '33';
+    ctx.fillRect(x1, y, Math.max(x2 - x1, 4), 6);
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.fillRect(x2 - 2, y, 4, 6);
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '9px Inter,sans-serif';
+    ctx.fillText(s.agent_name || s.agent_id?.slice(0, 8) || '?', 4, y + 5);
+  });
 }
 
 window.openSessionModal = function (id) {
-    const s = sessions.find(x => x.id === id);
-    if (!s) return;
-    window.openModal(`
+  const s = sessions.find(x => x.id === id);
+  if (!s) return;
+  window.openModal(`
   <div class="modal-header"><span class="modal-title">${s.agent_name || s.id}</span>
     <button class="icon-btn" onclick="closeModal()"><i class="fa fa-xmark"></i></button></div>
   <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1rem;">
@@ -126,9 +133,9 @@ window.openSessionModal = function (id) {
 };
 
 function bindEvents(el) {
-    document.getElementById('sess-search')?.addEventListener('input', renderSessions);
-    document.getElementById('sess-model')?.addEventListener('change', renderSessions);
-    document.getElementById('sess-status')?.addEventListener('change', renderSessions);
+  document.getElementById('sess-search')?.addEventListener('input', renderSessions);
+  document.getElementById('sess-model')?.addEventListener('change', renderSessions);
+  document.getElementById('sess-status')?.addEventListener('change', renderSessions);
 }
 
 function modelColor(m) { if (!m) return 'var(--color-text-muted)'; if (m.includes('opus')) return '#f59e0b'; if (m.includes('sonnet')) return '#6366f1'; if (m.includes('gemini')) return '#3b82f6'; if (m.includes('gpt')) return '#10b981'; return 'var(--color-text)'; }

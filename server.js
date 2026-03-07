@@ -1845,6 +1845,92 @@ function connectGateway() {
                     return;
                 }
 
+                // ─── Forward Session + Agent Activity Events → SSE ─────────────────────
+                // These events come from OpenClaw when Discord (or any channel) triggers
+                // an agent to start thinking/responding.
+
+                if (msg.type === 'event') {
+                    const ev = msg.event || '';
+                    const p = msg.payload || {};
+
+                    // Agent started processing (Discord message → agent thinking/generating)
+                    if (ev === 'session.start' || ev === 'agent.start' || ev === 'agent.thinking' || ev === 'agent.generating') {
+                        const agentId = p.agentId || p.agent_id || p.id;
+                        if (agentId) {
+                            // Update cached status to busy
+                            const node = gatewayNodes.find(n => n.id === agentId);
+                            if (node) node.status = 'busy';
+                            broadcastEvent({
+                                type: 'AGENT_STATUS_CHANGED',
+                                payload: {
+                                    agent_id: agentId,
+                                    status: 'busy',
+                                    event: ev,
+                                    channel: p.channel || p.channelId || null,
+                                    task: p.input?.slice?.(0, 80) || p.message?.slice?.(0, 80) || p.text?.slice?.(0, 80) || 'WORKING...'
+                                }
+                            });
+                            // Also re-broadcast nodes so status dots update
+                            broadcastEvent({ type: 'GATEWAY_NODES', payload: { nodes: getAgentsFromConfig() } });
+                        }
+                    }
+
+                    // Agent finished processing
+                    if (ev === 'session.complete' || ev === 'agent.complete' || ev === 'agent.idle' || ev === 'session.end') {
+                        const agentId = p.agentId || p.agent_id || p.id;
+                        if (agentId) {
+                            const node = gatewayNodes.find(n => n.id === agentId);
+                            if (node) node.status = 'idle';
+                            broadcastEvent({
+                                type: 'AGENT_STATUS_CHANGED',
+                                payload: { agent_id: agentId, status: 'idle', event: ev }
+                            });
+                            broadcastEvent({ type: 'GATEWAY_NODES', payload: { nodes: getAgentsFromConfig() } });
+                        }
+                    }
+
+                    // Session message (Discord → agent convo) — persist to sessions table so Sessions page fills up
+                    if (ev === 'session.message' || ev === 'session.msg' || ev === 'channel.message' || ev === 'message') {
+                        const agentId = p.agentId || p.agent_id;
+                        const sessionId = p.sessionId || p.session_id || p.id;
+                        const agentName = gatewayNodes.find(n => n.id === agentId)?.name || agentId || 'Unknown';
+                        const model = gatewayNodes.find(n => n.id === agentId)?.model || '';
+                        if (sessionId) {
+                            // Upsert into sessions table so the Sessions page shows real activity
+                            dbGet('SELECT id FROM sessions WHERE id=?', [sessionId]).then(existing => {
+                                if (!existing) {
+                                    dbRun('INSERT OR IGNORE INTO sessions (id,agent_id,agent_name,model,status,last_message) VALUES (?,?,?,?,?,?)',
+                                        [sessionId, agentId || '', agentName, model, 'active',
+                                            (p.content || p.text || p.message || '').slice(0, 500)]).catch(() => { });
+                                } else {
+                                    dbRun('UPDATE sessions SET status=?, last_message=?, updated_at=strftime(\'%s\',\'now\') WHERE id=?',
+                                        ['active', (p.content || p.text || p.message || '').slice(0, 500), sessionId]).catch(() => { });
+                                }
+                                // Notify frontend
+                                broadcastEvent({ type: 'SESSION_UPDATED', payload: { id: sessionId, agent_id: agentId, agent_name: agentName } });
+                            }).catch(() => { });
+                        }
+                    }
+
+                    // Drop tick events completely
+                    if (ev === 'tick') return;
+
+                    // Block verbose connection/disconnection events from flooding the UI
+                    if (ev === 'client.connected' || ev === 'client.disconnected') return;
+
+                    // health already handled above — just return
+                    if (ev === 'health') return;
+
+                    // Forward other useful events to SSE live feed (e.g. errors, notifications)
+                    if (!['tick', 'health', 'connect.challenge'].includes(ev)) {
+                        broadcastEvent({
+                            type: 'GATEWAY_MSG',
+                            payload: { event: ev, ...p }
+                        });
+                    }
+                    return;
+                }
+
                 // Drop tick events completely
                 if (msg.type === 'event' && msg.event === 'tick') {
                     return;
