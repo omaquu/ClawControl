@@ -141,9 +141,15 @@
 
       <!-- Agent Status -->
       <div style="padding: 0 1rem; margin-top: 0.5rem; margin-bottom: -0.5rem;">
-        <div class="nav-section-label" style="padding-left:0; margin-bottom: 0.25rem;">LIVE AGENTS</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.25rem;">
+          <div class="nav-section-label" style="padding-left:0;margin-bottom:0;">LIVE AGENTS</div>
+          <button id="agents-collapse-btn" title="Collapse/expand agent list"
+            style="background:none;border:none;color:var(--color-text-muted);cursor:pointer;font-size:0.65rem;padding:0.1rem 0.25rem;line-height:1;"
+            onclick="window.toggleAgentsList()">▾</button>
+        </div>
         <div id="sidebar-agents-list" style="display:flex;flex-direction:column;gap:0.3rem;"></div>
       </div>
+
 
       <!-- Nav Items -->
       <nav class="sidebar-nav">

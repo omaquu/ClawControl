@@ -486,8 +486,62 @@ function buildScene(agents, el) {
         // Stars removed per request.
     }
 
+    // ─── Status → body colour mapping ──────────────────────────────────────────
+    // idle = yellow, sleeping/offline = grey, active/online = green, busy = amber
+    function agentBodyColor(status) {
+        const s = (status || '').toLowerCase();
+        if (s === 'idle' || s === 'standby') return '#eab308'; // yellow
+        if (s === 'offline' || s === 'sleeping' || !status) return '#4b5563'; // grey
+        if (s === 'active' || s === 'online') return '#10b981'; // green
+        if (s === 'busy') return '#f59e0b'; // amber
+        if (s === 'error') return '#ef4444'; // red
+        return '#6b7280';
+    }
+
+    // ── Humanoid figure builder ─────────────────────────────────────────────────
+    // Returns a Group containing head, torso, arms, legs. Root at foot level (y=0).
+    function makeHumanoid(scene, bodyCol, accentCol) {
+        const M = THREE.MeshStandardMaterial;
+        const mat = (c, e) => new M({ color: c, roughness: 0.5, ...(e ? { emissive: e, emissiveIntensity: 0.25 } : {}) });
+        const grp = new THREE.Group();
+        // Legs
+        [[-0.1, 0], [0.1, 0]].forEach(([ox]) => {
+            const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.55, 8), mat(bodyCol));
+            leg.position.set(ox, 0.275, 0); leg.castShadow = true; grp.add(leg);
+        });
+        // Feet
+        [[-0.1, 0], [0.1, 0]].forEach(([ox]) => {
+            const foot = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.06, 0.16), mat(bodyCol));
+            foot.position.set(ox, 0.03, 0.03); grp.add(foot);
+        });
+        // Torso
+        const torso = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.38, 0.18), mat(accentCol, accentCol));
+        torso.position.set(0, 0.74, 0); torso.castShadow = true; grp.add(torso);
+        // Arms
+        [[-0.19, 0], [0.19, 0]].forEach(([ox]) => {
+            const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.045, 0.38, 8), mat(bodyCol));
+            arm.position.set(ox, 0.65, 0);
+            arm.rotation.z = ox < 0 ? 0.3 : -0.3;
+            arm.castShadow = true; grp.add(arm);
+        });
+        // Neck
+        const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.1, 8), mat(bodyCol));
+        neck.position.set(0, 0.98, 0); grp.add(neck);
+        // Head
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.145, 12, 12), mat(bodyCol));
+        head.position.set(0, 1.12, 0); head.castShadow = true; grp.add(head);
+        // Eyes
+        [[-0.05, 0], [0.05, 0]].forEach(([ox]) => {
+            const eye = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), new M({ color: '#ffffff', emissive: '#ffffff', emissiveIntensity: 0.5 }));
+            eye.position.set(ox, 1.13, 0.13); grp.add(eye);
+        });
+        scene.add(grp);
+        return grp;
+    }
+
     // ── Place agents ───────────────────────────────────────────────────────────
-    const avatarMeshes = [];
+    const avatarGroups = [];  // { group, head, agent }
+    const avatarMeshes = [];  // flat list of ALL meshes for raycasting
     const agentHudEl = el.querySelector('#office-agent-list');
     if (agentHudEl) agentHudEl.innerHTML = '';
 
@@ -498,47 +552,45 @@ function buildScene(agents, el) {
         const zone = ZONES[zoneName];
         const occ = zoneOccupancy[zoneName] = (zoneOccupancy[zoneName] || 0) + 1;
 
-        // Spread agents within zone
         const row = Math.floor((occ - 1) / 2), col = (occ - 1) % 2;
-        const px = zone.cx + (col - 0.5) * 1.2;
-        const pz = zone.cz - 1.5 + row * 1.1;
+        const px = zone.cx + (col - 0.5) * 1.4;
+        const pz = zone.cz - 1.5 + row * 1.3;
 
+        const bodyCol = agentBodyColor(agent.status);
+        const accentCol = zone.color;
         const sColor = STATUS_COLOR[agent.status] || '#888';
-        const color = zone.color;
 
-        // Avatar sphere
-        const avatar = new THREE.Mesh(
-            new THREE.SphereGeometry(0.2, 16, 16),
-            new THREE.MeshStandardMaterial({ color, roughness: 0.3, metalness: 0.3, emissive: color, emissiveIntensity: 0.3 })
-        );
-        avatar.position.set(px, 1.35, pz);
-        avatar.userData = { agent, color, zone: zone.label };
-        avatar.castShadow = true;
-        scene.add(avatar);
-        avatarMeshes.push(avatar);
+        const grp = makeHumanoid(scene, bodyCol, accentCol);
+        grp.position.set(px, 0, pz);
+        grp.userData = { agent, color: accentCol, zone: zone.label, bodyCol };
 
-        // Status halo ring
+        // Collect all child meshes for raycasting, tagging them with agent data
+        grp.traverse(m => { if (m.isMesh) { m.userData = grp.userData; avatarMeshes.push(m); } });
+        avatarGroups.push({ grp, agent });
+
+        // Status halo ring at waist height
         const halo = new THREE.Mesh(
-            new THREE.TorusGeometry(0.24, 0.022, 8, 32),
+            new THREE.TorusGeometry(0.22, 0.018, 8, 32),
             new THREE.MeshStandardMaterial({ color: sColor, emissive: sColor, emissiveIntensity: 1.0 })
         );
-        halo.position.set(px, 1.35, pz);
+        halo.position.set(px, 0.6, pz);
         halo.rotation.x = Math.PI / 2;
         scene.add(halo);
 
-        // Name tag (floating plane above avatar)
-        const tagTex = makeLabel(agent.name.slice(0, 14), 'rgba(0,0,0,0)', color);
+        // Name tag floating above head
+        const tagTex = makeLabel(agent.name.slice(0, 14), 'rgba(0,0,0,0)', accentCol);
         const tag = new THREE.Mesh(
             new THREE.PlaneGeometry(1.1, 0.28),
             new THREE.MeshBasicMaterial({ map: tagTex, transparent: true, depthWrite: false })
         );
-        tag.position.set(px, 1.85, pz);
+        tag.position.set(px, 1.55, pz);
+        tag.userData = { isNameTag: true, agentIndex: i };
         scene.add(tag);
 
-        // HUD
+        // HUD entry
         if (agentHudEl) {
             agentHudEl.innerHTML += `<div style="display:flex;align-items:center;gap:.5rem;padding:.2rem 0;">
-        <span style="width:8px;height:8px;border-radius:50%;background:${color};box-shadow:0 0 5px ${color};flex-shrink:0;"></span>
+        <span style="width:8px;height:8px;border-radius:50%;background:${bodyCol};box-shadow:0 0 5px ${bodyCol};flex-shrink:0;"></span>
         <span style="flex:1;font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${agent.name}</span>
         <span style="font-size:.7rem;color:${sColor};">${agent.status || '?'}</span>
       </div>`;
@@ -598,12 +650,14 @@ function buildScene(agents, el) {
     function animate() {
         _animId = requestAnimationFrame(animate);
         t += 0.012;
-        avatarMeshes.forEach((m, i) => {
-            m.position.y = 1.35 + Math.sin(t + i * 1.4) * 0.04;
+        // Bob entire humanoid groups
+        avatarGroups.forEach(({ grp }, i) => {
+            grp.position.y = Math.sin(t + i * 1.4) * 0.04;
         });
-        // Name tags face camera
-        nameTags.forEach(tag => {
-            tag.position.y = avatarMeshes[nameTags.indexOf(tag)]?.position.y + 0.5 || tag.position.y;
+        // Name tags hover above head and face camera
+        nameTags.forEach((tag, i) => {
+            const grp = avatarGroups[i];
+            if (grp) tag.position.y = grp.grp.position.y + 1.55;
             tag.lookAt(camera.position);
         });
         controls.update();

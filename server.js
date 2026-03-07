@@ -438,6 +438,39 @@ app.delete('/api/agents/:id', requireAuth, async (req, res) => {
     res.json({ ok: true });
 });
 
+// ─── API: Agent Images ────────────────────────────────────────────────────────
+const AGENT_IMG_DIR = path.join(DATA_DIR, 'agent-images');
+if (!fs.existsSync(AGENT_IMG_DIR)) fs.mkdirSync(AGENT_IMG_DIR, { recursive: true });
+
+app.post('/api/agents/:id/image', requireAuth, (req, res) => {
+    try {
+        const { data, type = 'image/png' } = req.body; // data = base64 string
+        if (!data) return res.status(400).json({ error: 'No image data' });
+        const ext = type.includes('png') ? '.png' : type.includes('gif') ? '.gif' : '.jpg';
+        const imgPath = path.join(AGENT_IMG_DIR, req.params.id + ext);
+        // Remove old images for this agent
+        ['.png', '.jpg', '.gif'].forEach(e => { const p = path.join(AGENT_IMG_DIR, req.params.id + e); if (fs.existsSync(p)) fs.unlinkSync(p); });
+        fs.writeFileSync(imgPath, Buffer.from(data.replace(/^data:[^;]+;base64,/, ''), 'base64'));
+        res.json({ ok: true, url: `/api/agents/${req.params.id}/image` });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/agents/:id/image', requireAuth, (req, res) => {
+    for (const ext of ['.png', '.jpg', '.gif']) {
+        const p = path.join(AGENT_IMG_DIR, req.params.id + ext);
+        if (fs.existsSync(p)) return res.sendFile(p);
+    }
+    res.status(404).json({ error: 'No image' });
+});
+
+app.get('/api/agents/images/list', requireAuth, (req, res) => {
+    try {
+        const files = fs.readdirSync(AGENT_IMG_DIR).filter(f => /\.(png|jpg|gif)$/.test(f));
+        const ids = files.map(f => f.replace(/\.(png|jpg|gif)$/, ''));
+        res.json(ids);
+    } catch { res.json([]); }
+});
+
 // ─── API: Sessions ────────────────────────────────────────────────────────────
 app.get('/api/sessions', requireAuth, async (req, res) => {
     const list = await dbAll('SELECT * FROM sessions ORDER BY updated_at DESC');

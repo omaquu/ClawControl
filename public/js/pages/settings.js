@@ -269,16 +269,37 @@ function bindEvents(el) {
 
 async function saveConfig() {
   const editor = document.getElementById('config-editor');
+  let parsed;
   try {
-    const parsed = JSON.parse(editor.value);
+    parsed = JSON.parse(editor.value);
     document.getElementById('json-error-badge')?.classList.add('hidden');
+  } catch (e) {
+    document.getElementById('json-error-badge')?.classList.remove('hidden');
+    window.showToast('Invalid JSON — fix syntax errors first', 'error');
+    return;
+  }
+
+  // Schema validation
+  const errs = [];
+  if (parsed.agents !== undefined && !Array.isArray(parsed.agents) && typeof parsed.agents !== 'object') {
+    errs.push('"agents" must be an object or array');
+  }
+  if (parsed.models !== undefined && !Array.isArray(parsed.models)) {
+    errs.push('"models" must be an array');
+  }
+  if (parsed.env !== undefined && (typeof parsed.env !== 'object' || Array.isArray(parsed.env))) {
+    errs.push('"env" must be a key-value object');
+  }
+  if (errs.length) {
+    window.showToast('Schema errors:\n' + errs.join('\n'), 'error');
+    return;
+  }
+
+  try {
     await window.apiFetch('/config', { method: 'POST', body: { content: JSON.stringify(parsed, null, 2) } });
     window.showToast('Config saved!', 'success');
   } catch (e) {
-    if (e instanceof SyntaxError) {
-      document.getElementById('json-error-badge')?.classList.remove('hidden');
-      window.showToast('Invalid JSON — fix errors first', 'error');
-    } else window.showToast(e.message, 'error');
+    window.showToast(e.message, 'error');
   }
 }
 

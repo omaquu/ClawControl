@@ -290,20 +290,33 @@ async function loadSidebarAgents() {
     }
     // Cache for kanban task modal
     window._agents = agents;
+    const mainAgent = agents.find(a => a.isDefault) || agents[0];
     list.innerHTML = agents.map(a => {
       const status = a.status || 'offline';
       const statusColor = status === 'online' || status === 'active' ? 'var(--color-success)' : status === 'busy' ? 'var(--color-warning)' : status === 'error' ? 'var(--color-danger)' : 'var(--color-text-muted)';
       const statusDot = `<div style="width:6px;height:6px;border-radius:50%;background:${statusColor};flex-shrink:0;"></div>`;
-      return `<div class="sidebar-agent-item" style="display:flex;align-items:center;gap:0.4rem;padding:0.3rem 0;cursor:pointer;opacity:0.8;transition:0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'" onclick="window.navigate('chat', { agentId: '${a.id}' })">
+      const isMain = (a.id === mainAgent?.id);
+      return `<div class="sidebar-agent-item" data-agent-main="${isMain}" style="display:flex;align-items:center;gap:0.4rem;padding:0.3rem 0;cursor:pointer;opacity:0.8;transition:0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'" onclick="window.navigate('chat', { agentId: '${a.id}' })">
         ${statusDot}
         <div style="flex:1;min-width:0;">
-          <div style="font-size:0.75rem;font-weight:500;color:var(--color-text);" class="truncate">${a.name}</div>
+          <div style="font-size:0.75rem;font-weight:500;color:var(--color-text);" class="truncate">${a.name}${isMain ? ' <span style="font-size:0.6rem;color:var(--color-accent);opacity:0.7;">★</span>' : ''}</div>
           <div style="font-size:0.65rem;color:var(--color-text-muted);" class="truncate">${a.kind || a.model || 'agent'}</div>
         </div>
       </div>`;
     }).join('');
   } catch (e) { }
 }
+
+let _agentsListExpanded = true;
+window.toggleAgentsList = function () {
+  _agentsListExpanded = !_agentsListExpanded;
+  const btn = document.getElementById('agents-collapse-btn');
+  if (btn) btn.textContent = _agentsListExpanded ? '▾' : '▸';
+  document.querySelectorAll('#sidebar-agents-list .sidebar-agent-item').forEach(el => {
+    const isMain = el.dataset.agentMain === 'true';
+    el.style.display = (_agentsListExpanded || isMain) ? '' : 'none';
+  });
+};
 
 function addFeedItem(event) {
   const container = document.getElementById('feed-items');
