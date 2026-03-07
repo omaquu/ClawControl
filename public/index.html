@@ -204,9 +204,6 @@
         <a class="nav-item" data-page="memory" href="#memory">
           <i class="fa fa-brain"></i><span>Memory Browser</span>
         </a>
-        <a class="nav-item" data-page="search" href="#search">
-          <i class="fa fa-magnifying-glass"></i><span>Global Search</span>
-        </a>
         <a class="nav-item" data-page="notifications" href="#notifications">
           <i class="fa fa-bell"></i><span>Notifications</span>
           <span class="nav-badge hidden" id="notif-nav-badge"></span>
@@ -235,6 +232,10 @@
           <h1 id="page-title" class="page-title">Mission Queue</h1>
           <select id="workspace-selector" class="form-select"
             style="margin-left:1.5rem;height:24px;padding:0 24px 0 8px;font-size:0.7rem;width:auto;min-width:120px;background:var(--color-surface);border-color:var(--color-border);"></select>
+          <button class="icon-btn" onclick="window.navigateTo('search')" title="Global Search"
+            style="margin-left:0.5rem;height:32px;width:32px;border:1px solid var(--color-border);border-radius:var(--radius-sm);background:var(--color-surface);font-size:0.8rem;color:var(--color-text-muted);">
+            <i class="fa fa-magnifying-glass"></i>
+          </button>
         </div>
         <div class="topbar-right">
           <div id="error-badge" class="error-badge hidden">

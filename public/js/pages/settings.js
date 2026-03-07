@@ -19,7 +19,7 @@ function buildLayout() {
     <div class="card" style="display:flex;flex-direction:column;overflow:hidden;padding:0;">
       <div style="padding:0.75rem 1rem;border-bottom:1px solid var(--color-border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
         <div style="display:flex;align-items:center;gap:0.75rem;">
-          <span style="font-family:var(--font-mono);font-size:0.8rem;color:var(--color-text-muted);">openclaw.json</span>
+          <span id="cfg-path-display" style="font-family:var(--font-mono);font-size:0.8rem;color:var(--color-text-muted);">openclaw.json</span>
           <span id="json-error-badge" class="hidden" style="font-size:0.68rem;color:var(--color-danger);background:rgba(239,68,68,0.12);padding:0.15rem 0.5rem;border-radius:999px;"><i class="fa fa-circle-exclamation"></i> Invalid</span>
         </div>
         <div style="display:flex;gap:0.4rem;">
@@ -164,6 +164,12 @@ async function loadConfig() {
       configText = JSON.stringify(JSON.parse(data?.content || '{}'), null, 2);
       editor.value = configText;
       updateLineNumbers();
+
+      const pathDisplay = document.getElementById('cfg-path-display');
+      if (pathDisplay) {
+        pathDisplay.textContent = data.path ? `openclaw.json (${data.path})` : 'openclaw.json (Global Fallback)';
+        pathDisplay.title = data.path || 'Loaded from ~/.openclaw/openclaw.json';
+      }
     }
   } catch (e) {
     const ed = document.getElementById('config-editor');
@@ -204,9 +210,14 @@ function bindEvents(el) {
   });
 
   editor?.addEventListener('input', () => {
-    updateLineNumbers();
-    try { JSON.parse(editor.value); document.getElementById('json-error-badge')?.classList.add('hidden'); }
-    catch { document.getElementById('json-error-badge')?.classList.remove('hidden'); }
+    try {
+      JSON.parse(editor.value);
+      document.getElementById('json-error-badge')?.classList.add('hidden');
+      updateLineNumbers();
+    } catch (err) {
+      document.getElementById('json-error-badge')?.classList.remove('hidden');
+      updateLineNumbers(err);
+    }
   });
 
   editor?.addEventListener('scroll', () => {
@@ -273,8 +284,10 @@ async function saveConfig() {
   try {
     parsed = JSON.parse(editor.value);
     document.getElementById('json-error-badge')?.classList.add('hidden');
+    updateLineNumbers();
   } catch (e) {
     document.getElementById('json-error-badge')?.classList.remove('hidden');
+    updateLineNumbers(e);
     window.showToast('Invalid JSON — fix syntax errors first', 'error');
     return;
   }
@@ -303,12 +316,45 @@ async function saveConfig() {
   }
 }
 
-function updateLineNumbers() {
+function updateLineNumbers(jsonError = null) {
   const editor = document.getElementById('config-editor');
   const ln = document.getElementById('line-numbers');
   if (!editor || !ln) return;
-  const count = (editor.value.match(/\n/g) || []).length + 1;
-  ln.textContent = Array.from({ length: count }, (_, i) => i + 1).join('\n');
+
+  const lines = editor.value.split('\n');
+  const count = lines.length;
+
+  let errorLineNum = -1;
+  if (jsonError) {
+    const msg = jsonError.message || '';
+    // Parse "position X" or "line X" depending on browser's JSON engine
+    const posMatch = msg.match(/position (\d+)/);
+    const lineMatch = msg.match(/line (\d+)/);
+
+    if (lineMatch) {
+      errorLineNum = parseInt(lineMatch[1], 10);
+    } else if (posMatch) {
+      // Calculate line number from position
+      const pos = parseInt(posMatch[1], 10);
+      let currentPos = 0;
+      for (let i = 0; i < lines.length; i++) {
+        currentPos += lines[i].length + 1; // +1 for newline
+        if (currentPos > pos) { errorLineNum = i + 1; break; }
+      }
+    }
+  }
+
+  // Build the gutter HTML, highlighting the error line if found
+  const htmlLines = [];
+  for (let i = 1; i <= count; i++) {
+    if (i === errorLineNum) {
+      htmlLines.push(`<span style="background:rgba(239,68,68,0.2);display:block;color:var(--color-danger);width:100%;">${i}</span>`);
+    } else {
+      htmlLines.push(`<span>${i}</span>`);
+    }
+  }
+
+  ln.innerHTML = htmlLines.join('\n');
   ln.scrollTop = editor.scrollTop;
 }
 

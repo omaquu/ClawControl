@@ -1156,8 +1156,9 @@ function findMemoryFiles(dir, baseDir, results = []) {
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
             const fullPath = path.join(dir, entry.name);
             if (entry.isDirectory()) {
-                // Recurse into workspace-* dirs inside OPENCLAW_DIR
-                if (dir === baseDir || entry.name.startsWith('workspace')) {
+                // For memory directories, we generally want to traverse all subdirectories
+                // ignoring hidden folders like .git
+                if (!entry.name.startsWith('.')) {
                     findMemoryFiles(fullPath, baseDir, results);
                 }
             } else if (['.md', '.txt', '.json'].includes(path.extname(entry.name).toLowerCase())) {

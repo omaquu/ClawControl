@@ -2,6 +2,7 @@
 let _memFiles = [];
 let _memCurrent = null;
 let _memEl = null;
+let _memAgentFilter = 'all';
 
 export async function init(el) {
   _memEl = el;
@@ -9,6 +10,10 @@ export async function init(el) {
   await loadFiles(el);
   el.querySelector('#mem-refresh-btn').addEventListener('click', () => loadFiles(el));
   el.querySelector('#mem-search-input').addEventListener('input', (e) => filterFiles(e.target.value, el));
+  el.querySelector('#mem-agent-select').addEventListener('change', (e) => {
+    _memAgentFilter = e.target.value;
+    filterFiles(el.querySelector('#mem-search-input').value, el);
+  });
   el.querySelector('#mem-save-btn').addEventListener('click', () => saveFile());
   el.querySelector('#mem-editor').addEventListener('input', () => {
     el.querySelector('#mem-save-btn').style.display = '';
@@ -25,6 +30,9 @@ function renderPage() {
       <p class="page-sub">Explore and edit agent memory files</p>
     </div>
     <div style="display:flex;gap:0.5rem;">
+      <select class="form-select" id="mem-agent-select" style="width:180px;font-size:0.8rem;">
+        <option value="all">All Agents / Global</option>
+      </select>
       <input class="form-input" id="mem-search-input" placeholder="🔎 Filter files…" style="width:220px;">
       <button class="btn btn-ghost" id="mem-refresh-btn"><i class="fa fa-rotate"></i></button>
     </div>
@@ -48,12 +56,35 @@ async function loadFiles(el) {
   const files = await window.apiFetch('/memory');
   if (!files) return;
   _memFiles = files;
-  renderFileList(_memFiles, el);
+
+  // Extract unique top-level directories (which are usually agent IDs or workspace names in OpenClaw)
+  const agents = new Set();
+  for (const f of files) {
+    if (f.path.includes('/')) agents.add(f.path.split('/')[0]);
+  }
+  const select = el.querySelector('#mem-agent-select');
+  if (select) {
+    const currentVal = select.value;
+    select.innerHTML = '<option value="all">All Agents / Global</option>' +
+      Array.from(agents).map(a => `<option value="${escHtml(a)}">${escHtml(a)}</option>`).join('');
+    if (Array.from(agents).includes(currentVal)) select.value = currentVal;
+  }
+
+  // Trigger initial filter
+  filterFiles(el.querySelector('#mem-search-input')?.value || '', el);
 }
 
 function filterFiles(q, el) {
-  if (!q) { renderFileList(_memFiles, el); return; }
-  const filtered = _memFiles.filter(f => f.path.toLowerCase().includes(q.toLowerCase()) || f.name.toLowerCase().includes(q.toLowerCase()));
+  let filtered = _memFiles;
+
+  if (_memAgentFilter !== 'all') {
+    filtered = filtered.filter(f => f.path.startsWith(_memAgentFilter + '/'));
+  }
+
+  if (q) {
+    filtered = filtered.filter(f => f.path.toLowerCase().includes(q.toLowerCase()) || f.name.toLowerCase().includes(q.toLowerCase()));
+  }
+
   renderFileList(filtered, el);
 }
 
@@ -70,28 +101,36 @@ function renderFileList(files, el) {
 
   listEl.innerHTML = Object.entries(groups).map(([dir, fls]) => `
     <div>
-      ${dir ? `<div style="padding:0.4rem 0.5rem 0.2rem;font-size:0.7rem;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;">${dir}</div>` : ''}
+      ${dir ? `<div style="padding:0.4rem 0.5rem 0.2rem;font-size:0.7rem;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.08em;font-weight:600;">${escHtml(dir)}</div>` : ''}
       ${fls.map(f => `
-        <div class="mem-file-item ${_memCurrent === f.path ? 'active' : ''}" data-path="${f.path}"
+        <div class="mem-file-item ${_memCurrent === f.path ? 'active' : ''}" data-path="${escHtml(f.path)}"
           style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.5rem;border-radius:6px;cursor:pointer;${_memCurrent === f.path ? 'background:var(--color-card);' : ''}transition:0.15s;"
           onmouseover="this.style.background='var(--color-card)'" onmouseout="this.style.background='${_memCurrent === f.path ? 'var(--color-card)' : 'transparent'}'"
-          onclick="window._memOpen('${f.path}')">
+          onclick="window._memOpen(this.getAttribute('data-path'))">
           <i class="fa ${f.name.endsWith('.md') ? 'fa-file-lines' : f.name.endsWith('.json') ? 'fa-file-code' : 'fa-file'}" style="color:var(--color-accent);font-size:0.8rem;flex-shrink:0;"></i>
-          <span style="font-size:0.82rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${f.name}</span>
+          <span style="font-size:0.82rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(f.name)}</span>
           <span style="font-size:0.68rem;color:var(--color-text-muted)">${Math.round(f.size / 1024 * 10) / 10}k</span>
         </div>`).join('')}
     </div>`).join('');
 
   window._memOpen = async (filePath) => {
     _memCurrent = filePath;
-    renderFileList(_memFiles, el);
-    const data = await window.apiFetch(`/memory/file?path=${encodeURIComponent(filePath)}`);
-    if (!data) return;
-    el.querySelector('#mem-editor-path').textContent = filePath;
-    el.querySelector('#mem-editor').value = data.content || '';
-    el.querySelector('#mem-save-btn').style.display = 'none';
+    // Re-render to update the active state highlighting
+    filterFiles(el.querySelector('#mem-search-input')?.value || '', el);
+
+    try {
+      const data = await window.apiFetch(`/memory/file?path=${encodeURIComponent(filePath)}`);
+      if (!data) return;
+      el.querySelector('#mem-editor-path').textContent = filePath;
+      el.querySelector('#mem-editor').value = data.content || '';
+      el.querySelector('#mem-save-btn').style.display = 'none';
+    } catch (err) {
+      window.showToast('Failed to load file: ' + err.message, 'error');
+    }
   };
 }
+
+function escHtml(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
 async function saveFile() {
   if (!_memCurrent || !_memEl) return;
