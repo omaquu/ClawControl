@@ -129,7 +129,10 @@ async function initDb() {
 // ─── Config ───────────────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.DASHBOARD_PORT || '7000');
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || process.cwd();
-const OPENCLAW_DIR = process.env.OPENCLAW_DIR || path.join(process.env.HOME || process.env.USERPROFILE || '', '.openclaw');
+let OPENCLAW_DIR = process.env.OPENCLAW_DIR || path.join(process.env.HOME || process.env.USERPROFILE || '', '.openclaw');
+if (!process.env.OPENCLAW_DIR && fs.existsSync(path.join(WORKSPACE_DIR, 'openclaw.json'))) {
+    OPENCLAW_DIR = WORKSPACE_DIR;
+}
 const MC_API_TOKEN = process.env.MC_API_TOKEN || '';
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 const GATEWAY_RETRY_BASE = parseInt(process.env.GATEWAY_RETRY_INTERVAL || '1000');
@@ -694,6 +697,34 @@ app.post('/api/config', requireAuth, (req, res) => {
     fs.writeFileSync(cfgPath, req.body.content);
     auditLog('config_write', {});
     res.json({ ok: true });
+});
+
+// ─── API: Agent Images ─────────────────────────────────────────────────────────
+
+app.post('/api/agents/:id/image', requireAuth, (req, res) => {
+    try {
+        const id = req.params.id;
+        const body = req.body.data;
+        if (!body || !body.includes('base64,')) return res.status(400).json({ error: 'Invalid image data' });
+        const base64Data = body.split('base64,')[1];
+        const dir = path.join(DATA_DIR, 'agent-images');
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        // Use a generic extension, the browser will infer the mime based on image content or we send it as is.
+        fs.writeFileSync(path.join(dir, `${id}.img`), base64Data, 'base64');
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/agents/:id/image', (req, res) => {
+    const p = path.join(DATA_DIR, 'agent-images', `${req.params.id}.img`);
+    if (fs.existsSync(p)) return res.sendFile(p);
+    res.status(404).json({ error: 'No image found' });
+});
+
+app.get('/api/agents/images/list', requireAuth, (req, res) => {
+    const dir = path.join(DATA_DIR, 'agent-images');
+    if (!fs.existsSync(dir)) return res.json([]);
+    res.json(fs.readdirSync(dir).map(f => f.replace('.img', '')));
 });
 
 // ─── API: Workspaces ────────────────────────────────────────────────────────────
@@ -1563,28 +1594,39 @@ wss.on('connection', (ws, req) => {
     const sessionId = new URL(req.url, 'http://localhost').searchParams.get('sessionId');
     if (!sessions.has(sessionId)) { ws.close(4001, 'Unauthorized'); return; }
 
-    if (!nodePty) {
-        ws.send(JSON.stringify({ type: 'output', data: 'node-pty not available. Install it for terminal support.\r\n' }));
-        return;
-    }
-
     const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
-    const pty = nodePty.spawn(shell, [], {
-        name: 'xterm-color',
-        cols: 80, rows: 24,
-        cwd: WORKSPACE_DIR,
-        env: process.env
-    });
 
-    pty.onData(data => { try { ws.send(JSON.stringify({ type: 'output', data })); } catch { } });
-    ws.on('message', msg => {
-        try {
-            const { type, data } = JSON.parse(msg);
-            if (type === 'input') pty.write(data);
-            else if (type === 'resize') pty.resize(data.cols, data.rows);
-        } catch { }
-    });
-    ws.on('close', () => { try { pty.kill(); } catch { } });
+    if (nodePty) {
+        const pty = nodePty.spawn(shell, [], {
+            name: 'xterm-color',
+            cols: 80, rows: 24,
+            cwd: WORKSPACE_DIR,
+            env: process.env
+        });
+
+        pty.onData(data => { try { ws.send(JSON.stringify({ type: 'output', data })); } catch { } });
+        ws.on('message', msg => {
+            try {
+                const { type, data } = JSON.parse(msg);
+                if (type === 'input') pty.write(data);
+                else if (type === 'resize') pty.resize(data.cols, data.rows);
+            } catch { }
+        });
+        ws.on('close', () => { try { pty.kill(); } catch { } });
+    } else {
+        ws.send(JSON.stringify({ type: 'output', data: '\x1b[33mnode-pty not available. Falling back to native child_process (no PTY support).\x1b[0m\r\n' }));
+        const { spawn } = require('child_process');
+        const child = spawn(shell, [], { cwd: WORKSPACE_DIR, env: process.env });
+        child.stdout.on('data', data => { try { ws.send(JSON.stringify({ type: 'output', data: data.toString().replace(/\n/g, '\r\n') })); } catch { } });
+        child.stderr.on('data', data => { try { ws.send(JSON.stringify({ type: 'output', data: data.toString().replace(/\n/g, '\r\n') })); } catch { } });
+        ws.on('message', msg => {
+            try {
+                const { type, data } = JSON.parse(msg);
+                if (type === 'input') child.stdin.write(data);
+            } catch { }
+        });
+        ws.on('close', () => { try { child.kill(); } catch { } });
+    }
 });
 
 // ─── Gateway WebSocket Proxy ──────────────────────────────────────────────────

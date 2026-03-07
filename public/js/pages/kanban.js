@@ -381,7 +381,7 @@ window.deleteTask = async function (id) {
 // Load gateway agents for task assignment dropdown
 window.apiFetch('/gateway/agents').then(a => { if (a) window._agents = a; }).catch(() => { });
 
-function escHtml(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
 function timeAgo(ts) {
   if (!ts) return '';
   const diff = Math.floor(Date.now() / 1000) - ts;

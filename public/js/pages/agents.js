@@ -170,10 +170,17 @@ function openEditModal(agent) {
       const agentList = Array.isArray(obj.agents) ? obj.agents : (obj.agents?.list || []);
       const idx = agentList.findIndex(a => a.id === agentId);
       if (idx >= 0) {
-        if (model) agentList[idx].model = { primary: model, fallback: fallback || agentList[idx].model?.fallback };
+        if (model) agentList[idx].model = fallback ? { primary: model, fallback } : model;
         if (name) agentList[idx].name = name;
         if (Array.isArray(obj.agents)) obj.agents = agentList;
         else obj.agents.list = agentList;
+      } else if (obj.agent && (!obj.agent.id || obj.agent.id === agentId || agentId === 'local' || agentList.length === 0)) {
+        // Fallback for singleton configuration
+        if (model) obj.agent.model = fallback ? { primary: model, fallback } : model;
+        if (name) obj.agent.name = name;
+      } else {
+        if (!obj.agents) obj.agents = [];
+        if (Array.isArray(obj.agents)) obj.agents.push({ id: agentId, name: name || agentId, model: fallback ? { primary: model, fallback } : model });
       }
       await window.apiFetch('/config', { method: 'POST', body: { content: JSON.stringify(obj, null, 2) } });
       window.closeModal();
