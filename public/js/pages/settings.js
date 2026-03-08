@@ -9,6 +9,7 @@ export async function init(el) {
   await loadAuthSettings();
   renderTabs();
   bindEvents(el);
+  loadSystemPaths();
 }
 export async function refresh(el) { loadConfig(); }
 
@@ -90,6 +91,11 @@ function buildLayout() {
           <button class="btn btn-danger btn-sm flex-1" data-action="disconnect-gateway"><i class="fa fa-stop"></i> Stop Reconnect</button>
           <button class="btn btn-secondary btn-sm flex-1" data-action="restart-gateway"><i class="fa fa-rotate"></i> Restart</button>
         </div>
+      </div>
+      <!-- System Paths (diagnostic) -->
+      <div class="card">
+        <div class="card-title" style="margin-bottom:0.75rem;"><i class="fa fa-folder-tree"></i> System Paths</div>
+        <div id="sys-paths-panel" style="font-size:0.75rem;color:var(--color-text-muted);">Loading…</div>
       </div>
       <!-- Danger zone -->
       <div class="card" style="border-color:var(--color-danger)20;">
@@ -200,7 +206,29 @@ async function loadAuthSettings() {
   }
 }
 
+async function loadSystemPaths() {
+  const panel = document.getElementById('sys-paths-panel');
+  if (!panel) return;
+  try {
+    const p = await window.apiFetch('/config/paths');
+    const row = (label, val, ok) => `
+      <div style="margin-bottom:0.5rem;">
+        <div style="font-weight:600;color:var(--color-text);font-size:0.72rem;">${label}</div>
+        <code style="font-size:0.68rem;color:${ok === undefined ? 'var(--color-text-muted)' : ok ? 'var(--color-success)' : 'var(--color-danger)'};word-break:break-all;">${escHtml(val || '—')}</code>
+      </div>`;
+    panel.innerHTML =
+      row('OpenClaw Dir', p.OPENCLAW_DIR) +
+      row('Config File', p.configPath, p.configExists) +
+      row('Database', p.DB_PATH) +
+      row('Workspace', p.WORKSPACE_DIR) +
+      (!p.configExists ? `<div style="padding:0.4rem 0.5rem;background:rgba(239,68,68,0.1);border-radius:6px;font-size:0.7rem;color:var(--color-danger);margin-top:0.3rem;">
+        <i class="fa fa-circle-exclamation"></i> openclaw.json not found here. Set <code>OPENCLAW_DIR</code> env var to fix.
+      </div>` : `<div style="color:var(--color-success);font-size:0.7rem;"><i class="fa fa-check"></i> Config found</div>`);
+  } catch { /* silently hide panel if endpoint unavailable */ }
+}
+
 function bindEvents(el) {
+
   const editor = document.getElementById('config-editor');
   const uploader = document.getElementById('cfg-upload');
 

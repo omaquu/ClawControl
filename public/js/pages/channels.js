@@ -99,4 +99,4 @@ window.deleteChannel = async function (id) {
 function platformColor(p) { const m = { 'YouTube': '#ff0000', 'Twitter/X': '#1da1f2', 'Twitch': '#9146ff', 'Podcast': '#f59e0b', 'Newsletter': '#10b981', 'Blog': '#6366f1' }; return m[p] || '#6b7280'; }
 function platformIcon(p) { const m = { 'YouTube': 'youtube', 'Twitter/X': 'twitter', 'Twitch': 'twitch', 'Podcast': 'podcast' }; return m[p] || 'rss'; }
 function escHtml(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-function timeAgo(ts) { if (!ts) return '—'; const d = Math.floor(Date.now() / 1000) - ts; return d < 86400 ? `${Math.floor(d / 3600)}h ago` : `${Math.floor(d / 86400)}d ago`; }
+const timeAgo = (ts) => { if (!ts) return '—'; const d = Math.floor(Date.now() / 1000) - ts; return d < 86400 ? `${Math.floor(d / 3600)}h ago` : `${Math.floor(d / 86400)}d ago`; };

@@ -49,14 +49,17 @@ function renderGatewayAgents() {
     const scopes = (n.scopes || []).join(', ') || 'none';
     const lastPing = n.stats?.lastPing ? new Date(n.stats.lastPing).toLocaleTimeString() : 'never';
     const model = n.model || '—';
-    const hasImg = agentImageIds.has(n.id);
-    const imgSrc = hasImg ? `/api/agents/${n.id}/image?t=${Date.now()}` : '';
+    const imgSrc = `/api/agents/${n.id}/image?t=${Date.now()}`;
+    const fallbackIcon = kind === 'operator' ? 'fa-server' : 'fa-robot';
 
-    const avatar = hasImg
-      ? `<img src="${imgSrc}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid var(--color-accent);" onerror="this.style.display='none'">`
-      : `<div style="width:44px;height:44px;border-radius:50%;background:var(--color-surface);border:2px solid var(--color-accent);display:flex;align-items:center;justify-content:center;">
-          <i class="fa ${kind === 'operator' ? 'fa-server' : 'fa-robot'}" style="color:var(--color-accent);"></i>
-        </div>`;
+    // Always attempt to load the image; onerror reveals the fallback icon div
+    const avatar = `
+      <div style="width:44px;height:44px;border-radius:50%;background:var(--color-surface);border:2px solid var(--color-accent);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;" class="agent-avatar-wrap">
+        <i class="fa ${fallbackIcon}" style="color:var(--color-accent);" data-fallback></i>
+        <img src="${imgSrc}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display='none'" onload="this.previousElementSibling.style.display='none'">
+      </div>`;
+    // Keep agentImageIds sync for future uploads but don't gate image display
+    const hasImg = true; // always try
 
     const statusColor = { online: '#10b981', active: '#10b981', busy: '#f59e0b', idle: '#eab308', offline: '#6b7280', error: '#ef4444' }[status] || '#6b7280';
 

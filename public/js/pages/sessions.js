@@ -140,4 +140,4 @@ function bindEvents(el) {
 
 function modelColor(m) { if (!m) return 'var(--color-text-muted)'; if (m.includes('opus')) return '#f59e0b'; if (m.includes('sonnet')) return '#6366f1'; if (m.includes('gemini')) return '#3b82f6'; if (m.includes('gpt')) return '#10b981'; return 'var(--color-text)'; }
 function fmtNum(n) { return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n); }
-function timeAgo(ts) { if (!ts) return ''; const d = Math.floor(Date.now() / 1000) - ts; return d < 60 ? `${d}s` : d < 3600 ? `${Math.floor(d / 60)}m` : d < 86400 ? `${Math.floor(d / 3600)}h` : `${Math.floor(d / 86400)}d`; }
+const timeAgo = (ts) => { if (!ts) return ''; const d = Math.floor(Date.now() / 1000) - ts; return d < 60 ? `${d}s` : d < 3600 ? `${Math.floor(d / 60)}m` : d < 86400 ? `${Math.floor(d / 3600)}h` : `${Math.floor(d / 86400)}d`; };

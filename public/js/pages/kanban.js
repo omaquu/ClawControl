@@ -252,7 +252,7 @@ async function importGatewayTasks(el) {
 }
 
 function escHtml(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-function timeAgo(ts) { if (!ts) return '—'; const d = Math.floor(Date.now() / 1000) - ts; return d < 60 ? `${d}s ago` : d < 3600 ? `${Math.floor(d / 60)}m ago` : d < 86400 ? `${Math.floor(d / 3600)}h ago` : `${Math.floor(d / 86400)}d ago`; }
+const timeAgo = (ts) => { if (!ts) return '—'; const d = Math.floor(Date.now() / 1000) - ts; return d < 60 ? `${d}s ago` : d < 3600 ? `${Math.floor(d / 60)}m ago` : d < 86400 ? `${Math.floor(d / 3600)}h ago` : `${Math.floor(d / 86400)}d ago`; };
 
 function openColorPicker(status, anchorEl) {
   const existing = document.getElementById('col-color-picker');
@@ -382,11 +382,4 @@ window.deleteTask = async function (id) {
 window.apiFetch('/gateway/agents').then(a => { if (a) window._agents = a; }).catch(() => { });
 
 
-function timeAgo(ts) {
-  if (!ts) return '';
-  const diff = Math.floor(Date.now() / 1000) - ts;
-  if (diff < 60) return `${diff}s ago`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
-}
+

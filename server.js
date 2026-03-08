@@ -130,15 +130,18 @@ async function initDb() {
 const PORT = parseInt(process.env.DASHBOARD_PORT || '7000');
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || process.cwd();
 let OPENCLAW_DIR = process.env.OPENCLAW_DIR || path.join(process.env.HOME || process.env.USERPROFILE || '', '.openclaw');
-if (!process.env.OPENCLAW_DIR) {
-    // Explicitly force OPENCLAW_DIR to be the current workspace directory to prevent config fragmentation
+if (!process.env.OPENCLAW_DIR && fs.existsSync(path.join(WORKSPACE_DIR, 'openclaw.json'))) {
+    // Rely on WORKSPACE_DIR if openclaw.json lives there (overriding default .openclaw)
     OPENCLAW_DIR = WORKSPACE_DIR;
 }
+
 const MC_API_TOKEN = process.env.MC_API_TOKEN || '';
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 const GATEWAY_RETRY_BASE = parseInt(process.env.GATEWAY_RETRY_INTERVAL || '1000');
 const DATA_DIR = process.env.DATA_DIR || path.join(WORKSPACE_DIR, 'data');
-const DB_PATH = process.env.DATABASE_PATH || path.join(DATA_DIR, 'clawcontrol.db');
+
+// Use openclaw.db from OPENCLAW_DIR if it exists (for sessions, agents etc) to stay in sync with OpenClaw. Otherwise fallback to clawcontrol.db.
+const DB_PATH = process.env.DATABASE_PATH || (fs.existsSync(path.join(OPENCLAW_DIR, 'openclaw.db')) ? path.join(OPENCLAW_DIR, 'openclaw.db') : path.join(DATA_DIR, 'clawcontrol.db'));
 const CREDENTIALS_PATH = path.join(DATA_DIR, 'credentials.json');
 const AUDIT_LOG = path.join(DATA_DIR, 'audit.log');
 const CLAWCONTROL_LOG = path.join(DATA_DIR, 'clawcontrol.log');
@@ -459,8 +462,8 @@ app.post('/api/agents/:id/image', requireAuth, (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/agents/:id/image', requireAuth, (req, res) => {
-    for (const ext of ['.png', '.jpg', '.gif']) {
+app.get('/api/agents/:id/image', (req, res) => {
+    for (const ext of ['.png', '.jpg', '.gif', '.img']) {
         const p = path.join(AGENT_IMG_DIR, req.params.id + ext);
         if (fs.existsSync(p)) return res.sendFile(p);
     }
@@ -677,18 +680,17 @@ app.post('/api/folder', requireAuth, (req, res) => {
 
 // ─── API: Config (openclaw.json) ──────────────────────────────────────────────
 app.get('/api/config', requireAuth, (req, res) => {
-    // Force read exact openclaw.json from the current workspace
-    const wsCfgPath = path.join(WORKSPACE_DIR, 'openclaw.json');
-    if (fs.existsSync(wsCfgPath)) {
-        return res.json({ content: fs.readFileSync(wsCfgPath, 'utf8'), exists: true, path: wsCfgPath });
+    const cfgPath = path.join(OPENCLAW_DIR, 'openclaw.json');
+    if (fs.existsSync(cfgPath)) {
+        return res.json({ content: fs.readFileSync(cfgPath, 'utf8'), exists: true, path: cfgPath });
     }
-    res.json({ content: '{}', exists: false, path: wsCfgPath });
+    // Fallback info if the config truly isn't found
+    res.json({ content: '{}', exists: false, path: cfgPath });
 });
 
 
 app.post('/api/config', requireAuth, (req, res) => {
-    // Force write exact openclaw.json to the current workspace
-    const cfgPath = path.join(WORKSPACE_DIR, 'openclaw.json');
+    const cfgPath = path.join(OPENCLAW_DIR, 'openclaw.json');
     try { JSON.parse(req.body.content); } catch { return res.status(400).json({ error: 'Invalid JSON' }); }
     if (fs.existsSync(cfgPath)) fs.copyFileSync(cfgPath, cfgPath + '.bak');
     fs.writeFileSync(cfgPath, req.body.content);
@@ -696,35 +698,22 @@ app.post('/api/config', requireAuth, (req, res) => {
     res.json({ ok: true });
 });
 
-// ─── API: Agent Images ─────────────────────────────────────────────────────────
 
-app.post('/api/agents/:id/image', requireAuth, (req, res) => {
-    try {
-        const id = req.params.id;
-        const body = req.body.data;
-        if (!body || !body.includes('base64,')) return res.status(400).json({ error: 'Invalid image data' });
-        const base64Data = body.split('base64,')[1];
-        const dir = path.join(DATA_DIR, 'agent-images');
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        // Use a generic extension, the browser will infer the mime based on image content or we send it as is.
-        fs.writeFileSync(path.join(dir, `${id}.img`), base64Data, 'base64');
-        res.json({ ok: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
 
-app.get('/api/agents/:id/image', (req, res) => {
-    const p = path.join(DATA_DIR, 'agent-images', `${req.params.id}.img`);
-    if (fs.existsSync(p)) return res.sendFile(p);
-    res.status(404).json({ error: 'No image found' });
-});
-
-app.get('/api/agents/images/list', requireAuth, (req, res) => {
-    const dir = path.join(DATA_DIR, 'agent-images');
-    if (!fs.existsSync(dir)) return res.json([]);
-    res.json(fs.readdirSync(dir).map(f => f.replace('.img', '')));
+// ─── API: Config Paths (diagnostic) ───────────────────────────────────────────
+app.get('/api/config/paths', requireAuth, (req, res) => {
+    const cfgPath = path.join(OPENCLAW_DIR, 'openclaw.json');
+    res.json({
+        OPENCLAW_DIR,
+        WORKSPACE_DIR,
+        DB_PATH,
+        configExists: fs.existsSync(cfgPath),
+        configPath: cfgPath
+    });
 });
 
 // ─── API: Workspaces ────────────────────────────────────────────────────────────
+
 app.get('/api/workspaces', requireAuth, (req, res) => {
     // Return current workspace as the only active one for now
     res.json([{
@@ -1167,18 +1156,20 @@ function findMemoryFiles(dir, baseDir, results = []) {
 }
 
 app.get('/api/memory', requireAuth, (req, res) => {
-    // Search OPENCLAW_DIR first, then fallback to WORKSPACE_DIR and its 'memory' subfolder
-    let files = findMemoryFiles(OPENCLAW_DIR, OPENCLAW_DIR);
-    if (!files.length) {
-        // Fallback: search workspace memory subdir, then workspace root
-        const memDir = path.join(WORKSPACE_DIR, 'memory');
-        if (fs.existsSync(memDir)) {
-            files = findMemoryFiles(memDir, memDir);
-        }
-        if (!files.length) {
-            files = findMemoryFiles(WORKSPACE_DIR, WORKSPACE_DIR);
-        }
+    // If 'memory' folder exists inside OPENCLAW_DIR, or 'workspace/memory', prioritize scanning those specifically
+    let files = [];
+    const directMem = path.join(OPENCLAW_DIR, 'memory');
+    const wsMem = path.join(OPENCLAW_DIR, 'workspace', 'memory');
+
+    // We always anchor against OPENCLAW_DIR so path.resolve in /file works seamlessly
+    if (fs.existsSync(wsMem)) {
+        files = findMemoryFiles(wsMem, OPENCLAW_DIR);
+    } else if (fs.existsSync(directMem)) {
+        files = findMemoryFiles(directMem, OPENCLAW_DIR);
+    } else {
+        files = findMemoryFiles(OPENCLAW_DIR, OPENCLAW_DIR);
     }
+
     res.json(files);
 });
 

@@ -106,14 +106,18 @@ function renderFileList(files, el) {
         <div class="mem-file-item ${_memCurrent === f.path ? 'active' : ''}" data-path="${escHtml(f.path)}"
           style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.5rem;border-radius:6px;cursor:pointer;${_memCurrent === f.path ? 'background:var(--color-card);' : ''}transition:0.15s;"
           onmouseover="this.style.background='var(--color-card)'" onmouseout="this.style.background='${_memCurrent === f.path ? 'var(--color-card)' : 'transparent'}'"
-          onclick="window._memOpen(this.getAttribute('data-path'))">
+        >
           <i class="fa ${f.name.endsWith('.md') ? 'fa-file-lines' : f.name.endsWith('.json') ? 'fa-file-code' : 'fa-file'}" style="color:var(--color-accent);font-size:0.8rem;flex-shrink:0;"></i>
           <span style="font-size:0.82rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(f.name)}</span>
           <span style="font-size:0.68rem;color:var(--color-text-muted)">${Math.round(f.size / 1024 * 10) / 10}k</span>
         </div>`).join('')}
     </div>`).join('');
 
-  window._memOpen = async (filePath) => {
+  // Use event delegation on the container — reliable regardless of render timing
+  listEl.onclick = async (e) => {
+    const item = e.target.closest('.mem-file-item');
+    if (!item) return;
+    const filePath = item.dataset.path;
     _memCurrent = filePath;
     // Re-render to update the active state highlighting
     filterFiles(el.querySelector('#mem-search-input')?.value || '', el);

@@ -795,17 +795,22 @@ function buildScene(agents, el) {
                 }
             });
         }
-        // Also react to chat/task events mentioning an agent
-        if (type === 'AGENT_TASK_START' || type === 'TASK_STARTED' || type === 'AGENT_STATUS_CHANGED') {
+        // React to chat/task events mentioning an agent
+        if (['AGENT_TASK_START', 'TASK_STARTED', 'AGENT_STATUS_CHANGED', 'AGENT_BUSY',
+            'TASK_UPDATED', 'TASK_ASSIGNED', 'DISCORD_MESSAGE', 'AGENT_THINKING'].includes(type)) {
             const agentId = payload?.agent_id || payload?.agentId;
             const newStatus = payload?.status;
-            if (agentId && (newStatus === 'busy' || !newStatus)) {
-                updateAgentState(agentId, 'busy', payload?.task || payload?.event || 'WORKING...');
-            } else if (agentId && (newStatus === 'idle' || newStatus === 'standby')) {
-                updateAgentState(agentId, 'idle');
+            if (agentId) {
+                if (newStatus === 'idle' || newStatus === 'standby') {
+                    updateAgentState(agentId, 'idle');
+                } else {
+                    // Treat this event as the agent becoming busy
+                    updateAgentState(agentId, 'busy', payload?.task || payload?.event || payload?.text?.slice(0, 20) || 'WORKING...');
+                }
             }
         }
-        if (type === 'AGENT_TASK_DONE' || type === 'TASK_COMPLETED' || type === 'CHAT_RESPONSE') {
+        if (['AGENT_TASK_DONE', 'TASK_COMPLETED', 'CHAT_RESPONSE', 'AGENT_IDLE',
+            'TASK_DONE', 'AGENT_FINISHED', 'DISCORD_RESPONSE_SENT'].includes(type)) {
             const agentId = payload?.agent_id || payload?.agentId;
             if (agentId) updateAgentState(agentId, 'idle');
         }
