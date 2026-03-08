@@ -63,7 +63,37 @@ async function loadThree() {
     const B = 'https://cdn.jsdelivr.net/npm/three@0.128.0';
     await loadScript(`${B}/build/three.min.js`);
     await loadScript(`${B}/examples/js/controls/OrbitControls.js`);
+    await loadScript(`${B}/examples/js/loaders/OBJLoader.js`);
 }
+
+// Try to load a per-agent OBJ from the server; resolves null if none uploaded
+async function tryLoadAgentOBJ(agentId, THREE) {
+    try {
+        const res = await fetch(`/api/agents/${agentId}/model`);
+        if (!res.ok) return null;
+        const objText = await res.text();
+        if (!window.THREE?.OBJLoader) return null;
+        return new Promise((resolve) => {
+            const loader = new THREE.OBJLoader();
+            try {
+                const obj = loader.parse(objText);
+                // Auto-scale to fit ~1.8 units tall (avatar height)
+                const box = new THREE.Box3().setFromObject(obj);
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                if (maxDim > 0) obj.scale.setScalar(1.8 / maxDim);
+                obj.traverse(child => {
+                    if (child.isMesh) {
+                        child.material = new THREE.MeshStandardMaterial({ color: 0xccccff, roughness: 0.5, metalness: 0.2 });
+                        child.castShadow = true;
+                    }
+                });
+                resolve(obj);
+            } catch { resolve(null); }
+        });
+    } catch { return null; }
+}
+
 
 // ── Zone definitions ──────────────────────────────────────────────────────────
 const ZONES = {
@@ -599,7 +629,22 @@ function buildScene(agents, el) {
         }
     });
 
+    // ── Async OBJ model swap ─────────────────────────────────────────────────
+    // For agents that have a .obj model uploaded, replace the procedural avatar
+    avatarGroups.forEach(({ grp, agent }) => {
+        tryLoadAgentOBJ(agent.id, THREE).then(objModel => {
+            if (!objModel) return;
+            // Remove procedural meshes
+            while (grp.children.length > 0) grp.remove(grp.children[0]);
+            objModel.position.set(0, 0, 0);
+            grp.add(objModel);
+            // Re-tag for raycasting
+            grp.traverse(m => { if (m.isMesh) m.userData = grp.userData; });
+        });
+    });
+
     if (!agents.length && agentHudEl) {
+
         agentHudEl.innerHTML = '<span style="color:#4b5563;font-size:.8rem">No agents yet</span>';
     }
 

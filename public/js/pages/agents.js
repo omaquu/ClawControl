@@ -32,7 +32,8 @@ function buildLayout() {
     </div>
   </div>
   <div id="gateway-agents-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1rem;"></div>
-  <input type="file" id="agent-img-upload" accept="image/png,image/jpeg,image/gif" style="display:none;">`;
+  <input type="file" id="agent-img-upload" accept="image/*" style="display:none;">
+  <input type="file" id="agent-model-upload" accept=".obj" style="display:none;">`;
 }
 
 function renderGatewayAgents() {
@@ -120,7 +121,7 @@ function bindEvents(el) {
     if (!file || !agentId) return;
     const reader = new FileReader();
     reader.onload = async (ev) => {
-      const data = ev.target.result; // base64 data URL
+      const data = ev.target.result;
       try {
         await window.apiFetch(`/agents/${agentId}/image`, { method: 'POST', body: { data, type: file.type } });
         agentImageIds.add(agentId);
@@ -129,6 +130,25 @@ function bindEvents(el) {
       } catch (err) { window.showToast('Image upload failed: ' + err.message, 'error'); }
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
+  });
+
+  document.getElementById('agent-model-upload')?.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    const agentId = e.target.dataset.targetId;
+    if (!file || !agentId) return;
+    if (!file.name.endsWith('.obj')) { window.showToast('Only .obj files supported', 'warning'); return; }
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        await window.apiFetch(`/agents/${agentId}/model`, { method: 'POST', body: { content: ev.target.result } });
+        window.showToast('3D model uploaded! Reload 3D Office to see it.', 'success');
+        // Update button label in the modal if still open
+        const lbl = document.getElementById('model-upload-label');
+        if (lbl) lbl.innerHTML = '<i class="fa fa-check"></i> Model uploaded';
+      } catch (err) { window.showToast('Model upload failed: ' + err.message, 'error'); }
+    };
+    reader.readAsText(file);
     e.target.value = '';
   });
 }
@@ -159,6 +179,9 @@ function openEditModal(agent) {
   </div>
   <div class="form-actions">
     <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+    <button class="btn btn-secondary" style="cursor:pointer;" title="Upload .obj file for 3D office avatar" onclick="const mu=document.getElementById('agent-model-upload');mu.dataset.targetId='${agent.id}';mu.click();" id="model-upload-label">
+      <i class="fa fa-cube"></i> Upload 3D Model (.obj)
+    </button>
     <button class="btn btn-primary" onclick="window._saveAgentEdit('${agent.id}')"><i class="fa fa-save"></i> Save to Config</button>
   </div>`);
 

@@ -357,7 +357,26 @@ window.openTaskModal = async function (id) {
   ${(task.deliverables || []).length > 0 ? `<hr class="divider"><div style="font-size:0.75rem;font-weight:600;margin-bottom:0.5rem;color:var(--color-success);">✅ DELIVERABLES</div><ul style="font-size:0.8rem;padding-left:1rem;">${(task.deliverables || []).map(d => `<li>${escHtml(d)}</li>`).join('')}</ul>` : ''}
   ${(task.errors || []).length > 0 ? `<hr class="divider"><div style="font-size:0.75rem;font-weight:600;margin-bottom:0.5rem;color:var(--color-danger);">❌ ERRORS</div><ul style="font-size:0.8rem;padding-left:1rem;">${(task.errors || []).map(e => `<li style="color:var(--color-danger);">${escHtml(e)}</li>`).join('')}</ul>` : ''}
   <hr class="divider">
-  <div style="font-size:0.72rem;color:var(--color-text-muted);">Created ${timeAgo(task.created_at)} · Updated ${timeAgo(task.updated_at)}</div>`, 'modal-lg');
+  <div style="font-size:0.72rem;color:var(--color-text-muted);">Created ${timeAgo(task.created_at)} · Updated ${timeAgo(task.updated_at)}</div>
+  ${task.agent_id && task.status !== 'DONE' && task.status !== 'ARCHIVE' ? `
+  <hr class="divider">
+  <button class="btn btn-primary w-full" onclick="window._dispatchTask('${id}')">
+    <i class="fa fa-paper-plane"></i> Dispatch to Agent
+  </button>` : ''}`, 'modal-lg');
+
+  window._dispatchTask = async (taskId) => {
+    const t = tasks.find(x => x.id === taskId);
+    if (!t) return;
+    const prompt = `[TASK ASSIGNED]\nTitle: ${t.title}\n${t.description ? 'Description: ' + t.description + '\n' : ''}Priority: ${t.priority}\nPlease begin working on this task.`;
+    try {
+      await window.apiFetch('/gateway/chat', { method: 'POST', body: { agentId: t.agent_id, message: prompt } });
+      await window.apiFetch(`/tasks/${taskId}`, { method: 'PUT', body: { status: 'IN_PROGRESS' } });
+      const task2 = tasks.find(x => x.id === taskId); if (task2) task2.status = 'IN_PROGRESS';
+      renderCards(tasks); updateSummaryBar();
+      window.closeModal();
+      window.showToast('Task dispatched to agent!', 'success');
+    } catch (e) { window.showToast('Dispatch failed: ' + e.message, 'error'); }
+  };
 };
 
 window.moveTask = async function (id, status) {

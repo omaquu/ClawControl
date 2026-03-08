@@ -129,11 +129,9 @@ async function initDb() {
 // ─── Config ───────────────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.DASHBOARD_PORT || '7000');
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || process.cwd();
-let OPENCLAW_DIR = process.env.OPENCLAW_DIR || path.join(process.env.HOME || process.env.USERPROFILE || '', '.openclaw');
-if (!process.env.OPENCLAW_DIR && fs.existsSync(path.join(WORKSPACE_DIR, 'openclaw.json'))) {
-    // Rely on WORKSPACE_DIR if openclaw.json lives there (overriding default .openclaw)
-    OPENCLAW_DIR = WORKSPACE_DIR;
-}
+// Default OPENCLAW_DIR to WORKSPACE_DIR (where openclaw.json and openclaw.db live in typical deployments)
+let OPENCLAW_DIR = process.env.OPENCLAW_DIR || WORKSPACE_DIR;
+
 
 const MC_API_TOKEN = process.env.MC_API_TOKEN || '';
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
@@ -478,7 +476,26 @@ app.get('/api/agents/images/list', requireAuth, (req, res) => {
     } catch { res.json([]); }
 });
 
+// ─── API: Agent 3D Model (OBJ) ────────────────────────────────────────────────
+app.get('/api/agents/:id/model', (req, res) => {
+    const p = path.join(AGENT_IMG_DIR, req.params.id + '.obj');
+    if (fs.existsSync(p)) return res.sendFile(p, { headers: { 'Content-Type': 'text/plain' } });
+    res.status(404).json({ error: 'No 3D model' });
+});
+
+app.post('/api/agents/:id/model', requireAuth, (req, res) => {
+    try {
+        const { content } = req.body; // OBJ file sent as plain text content
+        if (!content) return res.status(400).json({ error: 'No content' });
+        const modelPath = path.join(AGENT_IMG_DIR, req.params.id + '.obj');
+        fs.writeFileSync(modelPath, content);
+        auditLog('agent_model_upload', { agentId: req.params.id });
+        res.json({ ok: true, url: `/api/agents/${req.params.id}/model` });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── API: Sessions ────────────────────────────────────────────────────────────
+
 app.get('/api/sessions', requireAuth, async (req, res) => {
     const list = await dbAll('SELECT * FROM sessions ORDER BY updated_at DESC');
     res.json(list);
@@ -981,11 +998,16 @@ app.post('/api/gateway/chat', requireAuth, (req, res) => {
         return res.status(503).json({ error: 'Gateway not connected' });
     }
     const requestId = 'chat-' + Date.now();
+    // OpenClaw gateway chat.send protocol requires sessionKey, message, idempotencyKey
     gatewayWs.send(JSON.stringify({
         type: 'req',
         id: requestId,
         method: 'chat.send',
-        params: { agentId, text: message }
+        params: {
+            sessionKey: agentId,
+            message: message,
+            idempotencyKey: requestId
+        }
     }));
     res.json({ ok: true, requestId });
 });
