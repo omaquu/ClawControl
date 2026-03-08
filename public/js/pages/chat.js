@@ -141,6 +141,16 @@ async function selectAgent(agent, el, allAgents) {
               </div>
           </div>`;
   }
+
+  // Load chat history
+  try {
+    const hist = await window.apiFetch(`/chat/${agent.id}`);
+    if (hist && hist.length) {
+      hist.forEach(m => appendMessage(m));
+    }
+  } catch (e) {
+    console.error('Failed to load chat history', e);
+  }
 }
 
 function appendMessage(msg) {

@@ -991,12 +991,18 @@ app.get('/api/gateway/agents', requireAuth, (req, res) => {
     res.json(getAgentsFromConfig());
 });
 
-app.post('/api/gateway/chat', requireAuth, (req, res) => {
+app.post('/api/gateway/chat', requireAuth, async (req, res) => {
     const { agentId, message } = req.body || {};
     if (!agentId || !message) return res.status(400).json({ error: 'agentId and message required' });
     if (!gatewayWs || gatewayWs.readyState !== WebSocket.OPEN) {
         return res.status(503).json({ error: 'Gateway not connected' });
     }
+
+    // Save to local chat history for persistence
+    try {
+        await dbRun('INSERT INTO chat_messages (agent_id,role,content) VALUES (?,?,?)', [agentId, 'user', message]);
+    } catch (e) { console.error('Failed to save gateway chat history', e); }
+
     const requestId = 'chat-' + Date.now();
     // OpenClaw gateway chat.send protocol requires sessionKey, message, idempotencyKey
     gatewayWs.send(JSON.stringify({

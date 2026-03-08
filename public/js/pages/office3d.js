@@ -588,8 +588,8 @@ function buildScene(agents, el) {
         const px = zone.cx + (col - 0.5) * 1.4;
         const pz = zone.cz - 1.5 + row * 1.3;
 
-        const bodyCol = agentBodyColor(agent.status);
-        const accentCol = zone.color;
+        const bodyCol = agentBodyColor(agent.status) || '#6b7280';
+        const accentCol = zone.color || '#6366f1';
         const sColor = STATUS_COLOR[agent.status] || '#888';
 
         const grp = makeHumanoid(scene, bodyCol, accentCol);

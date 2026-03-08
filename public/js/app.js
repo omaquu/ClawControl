@@ -296,7 +296,7 @@ async function loadSidebarAgents() {
       const statusColor = status === 'online' || status === 'active' ? 'var(--color-success)' : status === 'busy' ? 'var(--color-warning)' : status === 'error' ? 'var(--color-danger)' : 'var(--color-text-muted)';
       const statusDot = `<div style="width:6px;height:6px;border-radius:50%;background:${statusColor};flex-shrink:0;"></div>`;
       const isMain = (a.id === mainAgent?.id);
-      return `<div class="sidebar-agent-item" data-agent-main="${isMain}" style="display:flex;align-items:center;gap:0.4rem;padding:0.3rem 0;cursor:pointer;opacity:0.8;transition:0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'" onclick="window.navigate('chat', { agentId: '${a.id}' })">
+      return `<div class="sidebar-agent-item" data-agent-main="${isMain}" style="display:${(_agentsListExpanded || isMain) ? 'flex' : 'none'};align-items:center;gap:0.4rem;padding:0.3rem 0;cursor:pointer;opacity:0.8;transition:0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'" onclick="window.navigate('chat', { agentId: '${a.id}' })">
         ${statusDot}
         <div style="flex:1;min-width:0;">
           <div style="font-size:0.75rem;font-weight:500;color:var(--color-text);" class="truncate">${a.name}${isMain ? ' <span style="font-size:0.6rem;color:var(--color-accent);opacity:0.7;">★</span>' : ''}</div>
