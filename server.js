@@ -129,8 +129,50 @@ async function initDb() {
 // ─── Config ───────────────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.DASHBOARD_PORT || '7000');
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || process.cwd();
-// Default OPENCLAW_DIR to WORKSPACE_DIR (where openclaw.json and openclaw.db live in typical deployments)
+// Default OPENCLAW_DIR to env var, fall back to WORKSPACE_DIR.
+// Then search common sub-paths if openclaw.json or openclaw.db isn't found at the base dir.
 let OPENCLAW_DIR = process.env.OPENCLAW_DIR || WORKSPACE_DIR;
+
+// Auto-resolve: search common candidate dirs for openclaw.json (primary) or openclaw.db (fallback signal).
+function resolveOpenClawDir(baseDir) {
+    const parentDir = path.dirname(baseDir);
+    const grandParentDir = path.dirname(parentDir);
+    const candidates = [
+        baseDir,
+        path.join(baseDir, '.openclaw'),
+        path.join(baseDir, 'workspace'),
+        path.join(baseDir, 'workspace', '.openclaw'),
+        parentDir,
+        path.join(parentDir, '.openclaw'),
+        path.join(parentDir, 'workspace'),
+        grandParentDir,
+        // Common Windows install locations
+        'C:\\AgentPina\\AllInPina',
+        'C:\\openclaw',
+        'C:\\Users\\kuron\\openclaw',
+        path.join(process.env.USERPROFILE || '', '.openclaw'),
+        path.join(process.env.HOME || '', '.openclaw'),
+    ];
+    // First pass: look for openclaw.json (most reliable)
+    for (const candidate of candidates) {
+        if (candidate && fs.existsSync(path.join(candidate, 'openclaw.json'))) {
+            return candidate;
+        }
+    }
+    // Second pass: look for openclaw.db (still useful for sessions/crons)
+    for (const candidate of candidates) {
+        if (candidate && fs.existsSync(path.join(candidate, 'openclaw.db'))) {
+            return candidate;
+        }
+    }
+    return baseDir; // fallback: keep original
+}
+OPENCLAW_DIR = resolveOpenClawDir(OPENCLAW_DIR);
+console.log(`📂 OPENCLAW_DIR resolved to: ${OPENCLAW_DIR}`)
+console.log(`   openclaw.json: ${fs.existsSync(path.join(OPENCLAW_DIR, 'openclaw.json')) ? '✅ FOUND' : '❌ NOT FOUND'}`)
+console.log(`   openclaw.db:   ${fs.existsSync(path.join(OPENCLAW_DIR, 'openclaw.db'))   ? '✅ FOUND' : '❌ NOT FOUND'}`)
+console.log(`   (Set OPENCLAW_DIR env var to override this auto-detection)`);
+
 
 
 const MC_API_TOKEN = process.env.MC_API_TOKEN || '';
@@ -138,8 +180,12 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 const GATEWAY_RETRY_BASE = parseInt(process.env.GATEWAY_RETRY_INTERVAL || '1000');
 const DATA_DIR = process.env.DATA_DIR || path.join(WORKSPACE_DIR, 'data');
 
-// Use openclaw.db from OPENCLAW_DIR if it exists (for sessions, agents etc) to stay in sync with OpenClaw. Otherwise fallback to clawcontrol.db.
-const DB_PATH = process.env.DATABASE_PATH || (fs.existsSync(path.join(OPENCLAW_DIR, 'openclaw.db')) ? path.join(OPENCLAW_DIR, 'openclaw.db') : path.join(DATA_DIR, 'clawcontrol.db'));
+// Try to find openclaw.db. If not found, use DATABASE_PATH (which docker-compose sets to clawcontrol.db), or fallback.
+let DB_PATH = path.join(OPENCLAW_DIR, 'openclaw.db');
+if (!fs.existsSync(DB_PATH)) {
+    DB_PATH = process.env.DATABASE_PATH || path.join(DATA_DIR, 'clawcontrol.db');
+}
+
 const CREDENTIALS_PATH = path.join(DATA_DIR, 'credentials.json');
 const AUDIT_LOG = path.join(DATA_DIR, 'audit.log');
 const CLAWCONTROL_LOG = path.join(DATA_DIR, 'clawcontrol.log');
@@ -583,10 +629,36 @@ app.get('/api/costs', requireAuth, async (req, res) => {
 
 // ─── API: Rate Limits ─────────────────────────────────────────────────────────
 app.get('/api/rate-limits', requireAuth, (req, res) => {
-    // Returns placeholder structure; real data comes from OpenClaw Gateway
+    // Pull real usage data from the cached gateway health snapshot when available
+    const snap = gatewaySnapshot || {};
+    const usage = snap.usage || snap.rateLimits || snap.limits || {};
+    const claudeUsage = usage.claude || usage.anthropic || snap.claude || {};
+    const geminiUsage = usage.gemini || usage.google || snap.gemini || {};
+
+    // Helper to extract token numbers from various field name patterns
+    const pick = (obj, ...keys) => { for (const k of keys) { if (obj[k] !== undefined && obj[k] !== null) return Number(obj[k]) || 0; } return 0; };
+
     res.json({
-        claude: { windowTokens: 0, windowLimit: 0, weeklyTokens: 0, weeklyLimit: 0, burnRate: 0, windowResets: 0 },
-        gemini: { windowTokens: 0, windowLimit: 0, burnRate: 0 },
+        claude: {
+            windowTokens:  pick(claudeUsage, 'windowTokens', 'tokens', 'usedTokens', 'input_tokens'),
+            windowLimit:   pick(claudeUsage, 'windowLimit', 'limit', 'tokenLimit', 'max_tokens'),
+            weeklyTokens:  pick(claudeUsage, 'weeklyTokens', 'weekly_tokens', 'weekTotal'),
+            weeklyLimit:   pick(claudeUsage, 'weeklyLimit', 'weekly_limit', 'weekLimit'),
+            burnRate:      pick(claudeUsage, 'burnRate', 'burn_rate', 'tokensPerMinute'),
+            windowResets:  pick(claudeUsage, 'windowResets', 'resetsIn', 'reset_in'),
+            windowCost:    pick(claudeUsage, 'windowCost', 'cost', 'estimatedCost'),
+            apiCalls:      pick(claudeUsage, 'apiCalls', 'requests', 'callCount'),
+            costPerMin:    pick(claudeUsage, 'costPerMin', 'costPerMinute'),
+            safeUntilLimit: claudeUsage.safeUntilLimit || false,
+            modelBreakdown: claudeUsage.modelBreakdown || claudeUsage.byModel || null,
+        },
+        gemini: {
+            windowTokens: pick(geminiUsage, 'windowTokens', 'tokens', 'usedTokens'),
+            windowLimit:  pick(geminiUsage, 'windowLimit', 'limit'),
+            burnRate:     pick(geminiUsage, 'burnRate', 'burn_rate'),
+        },
+        // raw snapshot for debugging / future fields
+        _raw: Object.keys(snap).length > 0 ? snap : undefined,
         updated: Date.now()
     });
 });
@@ -611,6 +683,7 @@ app.get('/api/system', requireAuth, async (req, res) => {
 });
 
 // ─── API: Files ───────────────────────────────────────────────────────────────
+// Files Browser is anchored to WORKSPACE_DIR so users browse their active project files
 function safePath(p) {
     const base = WORKSPACE_DIR;
     const resolved = path.resolve(base, p || '');
@@ -668,6 +741,22 @@ app.post('/api/file/rename', requireAuth, (req, res) => {
         if (fs.existsSync(newTarget) && oldTarget.toLowerCase() !== newTarget.toLowerCase()) return res.status(400).json({ error: 'Destination already exists' });
         fs.renameSync(oldTarget, newTarget);
         auditLog('file_rename', { oldPath: req.body.oldPath, newPath: req.body.newPath });
+        res.json({ ok: true });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/file', requireAuth, (req, res) => {
+    try {
+        const target = safePath(req.query.path || req.body?.path || '');
+        if (!fs.existsSync(target)) return res.status(404).json({ error: 'File not found' });
+        const stat = fs.statSync(target);
+        if (stat.isDirectory()) {
+            // Recursively delete directory
+            fs.rmSync(target, { recursive: true, force: true });
+        } else {
+            fs.unlinkSync(target);
+        }
+        auditLog('file_delete', { path: req.query.path || req.body?.path });
         res.json({ ok: true });
     } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -798,7 +887,36 @@ app.post('/api/crons/:id/trigger', requireAuth, async (req, res) => {
     const job = await dbGet('SELECT * FROM cron_jobs WHERE id=?', [req.params.id]);
     if (!job) return res.status(404).json({ error: 'Not found' });
     await dbRun('UPDATE cron_jobs SET last_run=? WHERE id=?', [Math.floor(Date.now() / 1000), req.params.id]);
-    res.json({ message: `Triggered: ${job.name}` });
+
+    // Actually execute the cron command if one is set
+    if (job.command && job.command.trim()) {
+        const { exec } = require('child_process');
+        const agentId = job.agent_id || null;
+        // Broadcast busy status so 3D office reacts
+        if (agentId) {
+            broadcastEvent({ type: 'AGENT_STATUS_CHANGED', payload: { agent_id: agentId, status: 'busy', task: job.name } });
+        }
+        broadcastEvent({ type: 'CRON_TRIGGERED', payload: { id: job.id, name: job.name, command: job.command, status: 'running' } });
+
+        exec(job.command, { cwd: WORKSPACE_DIR, timeout: 60000, env: process.env }, async (err, stdout, stderr) => {
+            const output = (stdout || '').trim();
+            const errOut = (stderr || '').trim();
+            // Update last_run again with real completion time
+            await dbRun('UPDATE cron_jobs SET last_run=? WHERE id=?', [Math.floor(Date.now() / 1000), job.id]).catch(() => {});
+            broadcastEvent({
+                type: 'CRON_COMPLETED',
+                payload: { id: job.id, name: job.name, output, error: err ? (err.message || errOut) : null, success: !err }
+            });
+            // Mark agent idle after cron completes
+            if (agentId) {
+                broadcastEvent({ type: 'AGENT_STATUS_CHANGED', payload: { agent_id: agentId, status: 'idle' } });
+            }
+            console.log(`⏰ [Cron] ${job.name} completed. success=${!err}${err ? ' err=' + err.message : ''}`);
+        });
+        res.json({ message: `Triggered: ${job.name}`, status: 'running' });
+    } else {
+        res.json({ message: `Triggered: ${job.name} (no command set)` });
+    }
 });
 
 // ─── API: Channels ────────────────────────────────────────────────────────────
@@ -1164,18 +1282,24 @@ app.get('/api/system/docker', requireAuth, (req, res) => {
 });
 
 // ─── API: Memory Browser ──────────────────────────────────────────────────────
+// Sensitive files that should never appear in the Memory Browser
+const MEMORY_EXCLUDE_FILES = new Set(['credentials.json', 'openclaw.db', 'clawcontrol.db', 'audit.log', 'clawcontrol.log', 'openclaw.log']);
+const MEMORY_EXCLUDE_EXT = new Set(['.db', '.log', '.bak', '.env', '.key', '.pem', '.p12', '.lock']);
+
 function findMemoryFiles(dir, baseDir, results = []) {
     if (!fs.existsSync(dir)) return results;
     try {
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            // Skip hidden directories and sensitive files
+            if (entry.name.startsWith('.')) continue;
+            if (MEMORY_EXCLUDE_FILES.has(entry.name)) continue;
+            const ext = path.extname(entry.name).toLowerCase();
+            if (MEMORY_EXCLUDE_EXT.has(ext)) continue;
+
             const fullPath = path.join(dir, entry.name);
             if (entry.isDirectory()) {
-                // For memory directories, we generally want to traverse all subdirectories
-                // ignoring hidden folders like .git
-                if (!entry.name.startsWith('.')) {
-                    findMemoryFiles(fullPath, baseDir, results);
-                }
-            } else if (['.md', '.txt', '.json'].includes(path.extname(entry.name).toLowerCase())) {
+                findMemoryFiles(fullPath, baseDir, results);
+            } else if (['.md', '.txt', '.json'].includes(ext)) {
                 results.push({ path: path.relative(baseDir, fullPath).replace(/\\/g, '/'), name: entry.name, size: entry.size || fs.statSync(fullPath).size });
             }
         }
