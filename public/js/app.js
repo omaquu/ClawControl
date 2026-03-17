@@ -14,7 +14,18 @@ async function apiFetch(url, opts = {}) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(opts.body);
   }
-  const fullPath = url.startsWith('auth/') ? '/api' + url : (url.startsWith('http') ? url : 'api' + url); // Fallback logic
+  
+  // Normalize URL to always start with /api/ unless it's an absolute URL
+  let fullPath = url;
+  if (!url.startsWith('http') && !url.startsWith('/')) {
+    fullPath = '/api/' + url;
+  } else if (url.startsWith('/')) {
+    // If it starts with /, ensure it's /api/ if not already (unless it's a static resource)
+    if (!url.startsWith('/api/')) {
+        fullPath = '/api' + url;
+    }
+  }
+
   const res = await fetch(fullPath, opts);
   if (res.status === 401 && !url.includes('/auth/logout')) {
     handleLogout();
@@ -33,23 +44,9 @@ window.apiFetch = apiFetch;
 
 // Convenience alias — new pages use window.api(path, opts)
 window.api = async (path, opts = {}) => {
-  if (!opts.headers) opts.headers = {};
-  if (currentSession) opts.headers['x-session-id'] = currentSession;
-  if (opts.body && typeof opts.body === 'string') opts.headers['Content-Type'] = 'application/json';
-  const fullPath = path.startsWith('api') ? path : 'api' + (path.startsWith('/') ? path : '/' + path);
-  const res = await fetch(fullPath, opts);
-  if (res.status === 401 && !fullPath.includes('/auth/logout')) {
-    handleLogout();
-    return null;
-  }
-  const ct = res.headers.get('content-type') || '';
-  if (ct.includes('json')) {
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'API error');
-    return data;
-  }
-  return await res.text();
+  return apiFetch(path, opts);
 };
+
 
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
